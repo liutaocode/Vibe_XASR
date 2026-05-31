@@ -50,6 +50,14 @@ public sealed class Settings
     public VadKind Vad { get; set; } = VadKind.Silero;
 
     /// <summary>
+    /// The VAD actually usable on Windows. FireRedVAD on macOS uses a custom onnxruntime shim
+    /// (not sherpa-onnx), which isn't ported to Windows and isn't downloadable — so a persisted
+    /// or selected <see cref="VadKind.FireRed"/> coerces to Silero rather than killing the engine.
+    /// </summary>
+    [JsonIgnore]
+    public VadKind EffectiveVad => Vad == VadKind.FireRed ? VadKind.Silero : Vad;
+
+    /// <summary>
     /// Push-to-talk key. Stored as a Win32 virtual-key code (VK_*).
     /// Default = Right Ctrl (VK_RCONTROL = 0xA3). TODO(win): confirm the default
     /// feels right on a real keyboard; some users prefer a function key (e.g. F8 = 0x77).
@@ -59,8 +67,26 @@ public sealed class Settings
     /// <summary>If true, the OnCall overlay starts automatically at launch.</summary>
     public bool OnCallAutoStart { get; set; } = false;
 
-    /// <summary>UI language code (en, zh, ja, ko). Skeleton ships "en" only.</summary>
-    public string Language { get; set; } = "en";
+    /// <summary>UI language code (auto, en, zh, ja, ko). Auto follows the system.</summary>
+    public string Language { get; set; } = "auto";
+
+    /// <summary>Keep the dictated text on the clipboard after each result (issue #12 parity).</summary>
+    public bool ClipboardOverwrite { get; set; } = false;
+
+    /// <summary>Persist dictation history locally. When off, records live 60 s then vanish.</summary>
+    public bool HistoryEnabled { get; set; } = true;
+
+    /// <summary>Start Vibe XASR with Windows sign-in (HKCU Run key).</summary>
+    public bool LaunchAtLogin { get; set; } = false;
+
+    /// <summary>Show the notification-area (tray) icon. Always on for now (the menu lives there).</summary>
+    public bool ShowTrayIcon { get; set; } = true;
+
+    /// <summary>Set once the first-run welcome/onboarding window has been shown.</summary>
+    public bool Welcomed { get; set; } = false;
+
+    /// <summary>Selected microphone endpoint ID. Empty = the system default recording device.</summary>
+    public string MicDeviceId { get; set; } = "";
 
     // ---- persistence ----
 

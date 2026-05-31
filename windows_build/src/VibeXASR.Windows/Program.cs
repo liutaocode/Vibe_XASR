@@ -27,6 +27,7 @@ internal static class Program
             return;
         }
 
+        Diag.Log("=== launch (VibeXASR " + Application.ProductVersion + ") ===");
         using var app = new TrayApp();
         app.Start();
 

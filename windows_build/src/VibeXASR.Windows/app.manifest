@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<assembly manifest_version="1.0" xmlns="urn:schemas-microsoft-com:asm.v1">
+<assembly manifestVersion="1.0" xmlns="urn:schemas-microsoft-com:asm.v1">
   <assemblyIdentity version="1.0.0.0" name="VibeXASR.Windows.app" />
 
   <!-- TODO(win): The low-level keyboard hook (WH_KEYBOARD_LL) and SendInput work without
@@ -15,13 +15,9 @@
     </security>
   </trustInfo>
 
-  <!-- Per-monitor v2 DPI awareness so the overlay form stays crisp on mixed-DPI setups. -->
-  <application xmlns="urn:schemas-microsoft-com:asm.v3">
-    <windowsSettings>
-      <dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2</dpiAwareness>
-      <dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/pm</dpiAware>
-    </windowsSettings>
-  </application>
+  <!-- DPI awareness (PerMonitorV2) is configured via the csproj <ApplicationHighDpiMode>
+       property + ApplicationConfiguration.Initialize(), so it is intentionally NOT set here
+       (setting it in both places triggers WFAC010). -->
 
   <!-- Declare Windows 10/11 compatibility so APIs behave as expected. -->
   <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">

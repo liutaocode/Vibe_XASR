@@ -57,7 +57,26 @@ public sealed class DictationEngine : IDisposable
     private volatile bool _capturing;
     private volatile bool _speechActive;
 
-    public DictationMode Mode { get; set; }
+    private DictationMode _mode;
+    /// <summary>
+    /// Current mode. Setting it updates continuous-capture state: OnCall captures
+    /// immediately; Paste/Type fall back to hotkey gating (and finalize any in-flight
+    /// utterance when leaving OnCall).
+    /// </summary>
+    public DictationMode Mode
+    {
+        get => _mode;
+        set
+        {
+            bool leavingOnCall = _mode == DictationMode.OnCall && value != DictationMode.OnCall;
+            _mode = value;
+            _capturing = value == DictationMode.OnCall;
+            if (leavingOnCall) _flushRequested = true;
+        }
+    }
+
+    /// <summary>Pause OnCall capture without leaving the mode (the overlay Pause button).</summary>
+    public bool Paused { get; set; }
 
     public event EventHandler<PartialEventArgs>? OnPartial;
     public event EventHandler<FinalEventArgs>? OnFinal;
@@ -78,7 +97,7 @@ public sealed class DictationEngine : IDisposable
         if (_running) return;
 
         _asr = new StreamingAsr(_paths, SampleRate);
-        _vad = new Vad(_paths, _settings.Vad, SampleRate);
+        _vad = new Vad(_paths, _settings.EffectiveVad, SampleRate);
 
         _running = true;
         _worker = new Thread(WorkerLoop) { IsBackground = true, Name = "VibeXASR-DictationWorker" };
@@ -143,53 +162,70 @@ public sealed class DictationEngine : IDisposable
             // Maintain preroll ring regardless of capture state, so onset isn't clipped.
             if (frame is not null) PushPreroll(frame);
 
-            bool capturing = _capturing;
+            bool capturing = _capturing && !Paused;
+            bool ptt = Mode != DictationMode.OnCall;
 
             if (capturing && frame is not null)
             {
-                _vad!.AcceptWaveform(frame);
-                bool nowSpeech = _vad.IsSpeechDetected();
-
-                if (nowSpeech && !_speechActive)
+                if (ptt)
                 {
-                    // Onset: replay preroll into the ASR first.
-                    _speechActive = true;
-                    var pre = DrainPreroll();
-                    if (pre.Length > 0) _asr!.AcceptWaveform(pre);
-                }
-
-                if (_speechActive)
-                {
+                    // PUSH-TO-TALK: the user is deliberately holding the key, so stream the
+                    // WHOLE hold to the ASR. Do NOT gate on the VAD — a quiet mic or a finicky
+                    // VAD threshold must never swallow the speech (that produced "no text").
+                    if (!_speechActive)
+                    {
+                        _speechActive = true;
+                        var pre = DrainPreroll();
+                        if (pre.Length > 0) _asr!.AcceptWaveform(pre);
+                        Diag.Log($"engine: PTT capture start (preroll {pre.Length} samples)");
+                    }
                     _asr!.AcceptWaveform(frame);
-
                     var partial = _asr.Partial();
                     if (partial != lastEmittedPartial)
                     {
                         lastEmittedPartial = partial;
                         OnPartial?.Invoke(this, new PartialEventArgs(partial));
                     }
-
-                    // Endpoint: VAD said speech stopped, or ASR's own endpoint rule fired.
-                    if ((!nowSpeech && _vad.HasSegment()) || _asr.IsEndpoint())
+                }
+                else
+                {
+                    // ON-CALL: always-on, so VAD segments utterances.
+                    _vad!.AcceptWaveform(frame);
+                    bool nowSpeech = _vad.IsSpeechDetected();
+                    if (nowSpeech && !_speechActive)
                     {
-                        FinalizeUtterance(ref lastEmittedPartial);
+                        _speechActive = true;
+                        var pre = DrainPreroll();
+                        if (pre.Length > 0) _asr!.AcceptWaveform(pre);
+                    }
+                    if (_speechActive)
+                    {
+                        _asr!.AcceptWaveform(frame);
+                        var partial = _asr.Partial();
+                        if (partial != lastEmittedPartial)
+                        {
+                            lastEmittedPartial = partial;
+                            OnPartial?.Invoke(this, new PartialEventArgs(partial));
+                        }
+                        if ((!nowSpeech && _vad.HasSegment()) || _asr.IsEndpoint())
+                            FinalizeUtterance(ref lastEmittedPartial);
                     }
                 }
             }
 
-            // Hotkey released (Paste/Type): flush whatever is buffered and finalize.
+            // Hotkey released (Paste/Type): finalize the hold and ALWAYS signal end-of-hold so
+            // the UI can drop the overlay even when nothing was recognized.
             if (_flushRequested)
             {
                 _flushRequested = false;
-                _vad!.Flush();
-                if (_speechActive || !string.IsNullOrEmpty(lastEmittedPartial))
-                    FinalizeUtterance(ref lastEmittedPartial);
+                try { _vad!.Flush(); } catch { /* vad may be mid-state */ }
+                FinalizeUtterance(ref lastEmittedPartial, endOfHold: true);
                 _speechActive = false;
             }
         }
     }
 
-    private void FinalizeUtterance(ref string lastEmittedPartial)
+    private void FinalizeUtterance(ref string lastEmittedPartial, bool endOfHold = false)
     {
         var text = _asr!.Finalize();
         _speechActive = false;
@@ -197,8 +233,12 @@ public sealed class DictationEngine : IDisposable
         // Drain any completed VAD segments so they don't leak into the next utterance.
         while (_vad!.HasSegment()) _vad.PopSegment();
 
+        Diag.Log($"engine: finalize len={text?.Length ?? 0} endOfHold={endOfHold} text=\"{(text ?? "")}\"");
         if (!string.IsNullOrWhiteSpace(text))
             OnFinal?.Invoke(this, new FinalEventArgs(text));
+        else if (endOfHold)
+            // Nothing recognized — fire an empty final so the host can close the overlay.
+            OnFinal?.Invoke(this, new FinalEventArgs(string.Empty));
     }
 
     // ---- preroll ring helpers ----

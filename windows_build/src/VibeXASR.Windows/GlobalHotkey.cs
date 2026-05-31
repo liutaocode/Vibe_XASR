@@ -56,7 +56,12 @@ public sealed class GlobalHotkey : IDisposable
     }
 
     /// <summary>Change the watched key at runtime (e.g. from Settings).</summary>
-    public void SetKey(int virtualKey) => _vk = virtualKey;
+    public void SetKey(int virtualKey)
+    {
+        Diag.Log($"GlobalHotkey.SetKey 0x{_vk:X2} -> 0x{virtualKey:X2} ({VibeXASR.Windows.Ui.VkNames.Name(virtualKey)})");
+        _vk = virtualKey;
+        _isDown = false; // drop any stale held-state from the previous key
+    }
 
     public void Install()
     {
@@ -73,6 +78,7 @@ public sealed class GlobalHotkey : IDisposable
         if (_hookHandle == IntPtr.Zero)
             throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(),
                 "Failed to install WH_KEYBOARD_LL hook.");
+        Diag.Log($"GlobalHotkey installed (vk=0x{_vk:X2}, handle={_hookHandle})");
     }
 
     private IntPtr HookCallback(int nCode, IntPtr wParam, IntPtr lParam)
@@ -89,6 +95,7 @@ public sealed class GlobalHotkey : IDisposable
                     if (!_isDown)
                     {
                         _isDown = true;
+                        Diag.Log($"hotkey DOWN vk=0x{_vk:X2}");
                         // Marshal back onto the UI thread happens naturally because the hook
                         // runs on the installing (UI) thread. Raise directly.
                         KeyDown?.Invoke(this, EventArgs.Empty);

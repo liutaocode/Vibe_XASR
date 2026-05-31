@@ -1,13 +1,15 @@
-# Vibe XASR — Windows port (skeleton)
+# Vibe XASR — Windows port
 
 A Windows tray app that mirrors the macOS **Vibe XASR** voice-dictation app: hold a
 global hotkey, speak, and the recognized **zh-en** text is inserted at the caret in
 whatever app currently has focus. **100% local / offline.**
 
-> **This is a SKELETON.** It is written to compile and be finished **on Windows**.
-> It cannot be built or run from macOS — the WinForms GUI and the Windows native
-> sherpa-onnx runtime require a Windows toolchain (`net8.0-windows`). Every spot that
-> needs real Windows wiring or a value to confirm is marked `// TODO(win):` in the source.
+> **Status: implemented and compiles on Windows.** The full UI is built (a macOS-faithful
+> Settings window with the 6-tab sidebar, History window, the menu-bar-style tray popup,
+> the HUD + OnCall overlays, and a 4-language zh/en/ja/ko interface), the engine wiring is
+> complete, and it publishes to a self-contained single-file `VibeXASR.exe` for **win-x64**
+> and **win-arm64** (verified by launching and screenshotting each surface on Windows 11).
+> All original `// TODO(win):` items have been resolved (see "Resolved" below).
 
 ## What it is
 
@@ -21,7 +23,7 @@ whatever app currently has focus. **100% local / offline.**
   - `oncall` — always-on, VAD-segmented; a borderless top-most overlay shows live text; copy manually.
 - **Local history** as JSON in `%APPDATA%\VibeXASR\history.json`.
 - **Settings** in `%APPDATA%\VibeXASR\settings.json` (mode, tier, hotkey, VAD, language).
-- 4-language UI is planned; the skeleton ships **English** only (with a language field stub).
+- **4-language UI** (中 / EN / 日 / 한), live-switchable; `Auto` follows the system language.
 
 ## Prerequisites
 
@@ -83,6 +85,49 @@ dotnet publish src/VibeXASR.Windows -c Release -r win-arm64 --self-contained -p:
 The output is a self-contained single-file `VibeXASR.exe` (bundled .NET runtime + native
 ONNX DLLs). Run it; a tray icon appears.
 
+## Installer (bundles the default model — works offline immediately)
+
+`installer/` builds a **per-user MSI** (`VibeXASR-Setup.msi`) that ships the app **plus the
+default 960 ms model + VAD inside it**, so a fresh install needs no first-run download.
+
+```powershell
+# one-time: the free WiX v5 toolset (v6/v7 require a paid EULA)
+dotnet tool install --global wix --version 5.0.2
+wix extension add -g WixToolset.UI.wixext/5.0.2
+
+cd installer
+powershell -ExecutionPolicy Bypass -File .\build-installer.ps1   # -> installer\VibeXASR-Setup.msi (~670 MB)
+```
+
+The installer:
+- installs to `%LOCALAPPDATA%\Programs\VibeXASR` — **per-user, no admin / no UAC**;
+- bundles `models\chunk-960ms-model\*` + `models\silero_vad.onnx`; the app reads them from
+  its install dir (like the macOS app reads `Resources/`), so it's **ready offline on first
+  launch** (extra latency tiers still download on demand to `%APPDATA%\VibeXASR`);
+- adds **Start-Menu + Desktop shortcuts** (with the app icon) and an Apps-list (uninstall)
+  entry; install silently with `msiexec /i VibeXASR-Setup.msi /qn`.
+
+The app icon is a real embedded multi-resolution `.ico` (`src/VibeXASR.Windows/appicon.ico`,
+referenced via `<ApplicationIcon>`), so Explorer / shortcuts / the tray all show the mark.
+
+> **VAD note:** the bundled VAD is **silero v4** — sherpa-onnx 1.10.x rejects silero **v5**
+> with `Unsupported silero vad model`. (FireRedVAD on macOS uses a custom shim, not sherpa,
+> so it isn't wired on Windows yet — Windows defaults to silero.)
+
+## Using it (push-to-talk) & troubleshooting
+
+- It's **push-to-talk**: **hold** the trigger key, **speak**, then **release** — the text is
+  inserted into whatever window has focus (click into a text field first). A quick tap with no
+  speech does nothing. The recognizer streams the *whole* hold (it does not gate on the VAD),
+  so quiet speech still gets through.
+- After launch, wait a moment for **就绪 / Ready** — the 565 MB model loads on a background
+  thread (the UI and hotkey stay responsive). Pressing the key before it's ready shows a
+  "model loading" tip rather than doing nothing.
+- VAD on Windows is **silero** (FireRedVAD is a macOS-only shim; a stored `fire` setting
+  coerces to silero so it can't break the engine).
+- A diagnostic log is written to **`%APPDATA%\VibeXASR\log.txt`** (hook install / hotkey /
+  engine ready / mic peak level / recognized text) — useful if dictation seems unresponsive.
+
 ## Parity vs macOS
 
 | Concern | macOS app | This Windows skeleton |
@@ -122,29 +167,55 @@ windows_build/
    │  └─ DictationEngine.cs        VAD->ASR orchestration, preroll, 3 modes, endpointing
    ├─ Input/
    │  └─ TextInserter.cs           SendInput KEYEVENTF_UNICODE + Backspace(n)
-   ├─ Ui/
-   │  └─ OverlayForm.cs            borderless top-most overlay; OnCall Copy/Stop
+   ├─ Ui/                          macOS-faithful WinForms surfaces (port of VibeUI)
+   │  ├─ Theme.cs                  design tokens (colors/fonts/radii) + dark title bar + rounded paths
+   │  ├─ L10n.cs                   4-language zh/en/ja/ko string table (port of L10n.swift)
+   │  ├─ Controls.cs               owner-drawn VibeToggle/VibeButton/Segmented/Select/ProgressBar + dark menu renderer
+   │  ├─ Branding.cs               runtime-generated accent app/tray icon
+   │  ├─ HotkeyRecorder.cs         click-to-record hotkey field (one-shot LL hook) + VK name map
+   │  ├─ SettingsForm.cs           sidebar + General/Dictation/Model/Records/Permissions/About tabs
+   │  ├─ TierManageRow.cs          per-tier download / use / cancel / delete row
+   │  ├─ HistoryForm.cs            HistoryPanel (stats + privacy + list, copy/edit/delete) + standalone window
+   │  ├─ TrayPopupForm.cs          menu-bar-style dropdown (status dot, recent card, toggle, entries)
+   │  ├─ OverlayForm.cs            rounded HUD pill (orb + waveform + caret) + OnCall panel; click-through
+   │  ├─ DownloadForm.cs           first-run model-download progress dialog
+   │  └─ IAppController.cs         live seam between windows and TrayApp (the SettingsBridge analogue)
    ├─ Storage/
-   │  ├─ Settings.cs               settings.json + enums + %APPDATA% paths
-   │  └─ HistoryStore.cs           history.json append/list/clear
+   │  ├─ Settings.cs               settings.json + enums + %APPDATA% paths (+ clip/history/launch/tray)
+   │  └─ HistoryStore.cs           history.json: id/mode/expiry per entry, lifetime stats, 60s ephemeral
    └─ Models/
       ├─ ModelPaths.cs             resolve per-tier file paths
-      └─ ModelDownloader.cs        download a tier from HF with progress
+      ├─ ModelDownloader.cs        download a tier from HF with progress
+      └─ ModelManager.cs           per-tier download state (progress/failed) + use/delete
 ```
 
-## Known TODOs (must finish on Windows)
+## Resolved (vs. the original skeleton)
 
-Search the source for `// TODO(win):`. The big ones:
+The original `// TODO(win):` items are done:
 
-1. **Verify NuGet versions + sherpa-onnx C# API.** Reconcile config struct/field names in
-   `StreamingAsr.cs` / `Vad.cs` with the installed `org.k2fsa.sherpa.onnx` version.
-2. **Confirm the P/Invoke signatures** for `SetWindowsHookEx`, `SendInput`, and the
-   `GetWindowLong`/`SetWindowLong` (use the `...Ptr` variants on 64-bit) calls; build and test
-   that the hook fires and Unicode injection lands in a real editor.
-3. **Decide hotkey suppression.** `GlobalHotkey` currently passes the key through; choose
-   whether to swallow it while held (return `(IntPtr)1`) to match macOS.
-4. **Real Settings + History windows** (tier/VAD/hotkey-capture/language; ListView + Clear).
-   Changing tier/VAD must re-run model download and restart the engine.
-5. **Overlay polish:** per-region click-through (text click-through, buttons clickable),
-   rounded pill, and wiring `CopyRequested` to the actual live overlay text rather than the
-   latest history entry.
+1. **sherpa-onnx C# API** — verified against `org.k2fsa.sherpa.onnx` **1.10.32**; the config
+   struct/field names in `StreamingAsr.cs` / `Vad.cs` compile as-is.
+2. **P/Invoke** — `SetWindowsHookEx`, `SendInput`, and the overlay now use the 64-bit
+   `GetWindowLongPtr`/`SetWindowLongPtr` variants. A manifest typo (`manifest_version` →
+   `manifestVersion`) that blocked process start was fixed.
+3. **Real Settings + History windows** — full macOS-style Settings (6-tab sidebar, live
+   tier/VAD/hotkey/language; switching tier/VAD re-downloads + rebuilds the engine) and a
+   History window (stats, per-row copy/edit/delete, export, clear-all confirm).
+4. **Tray UX** — a menu-bar-style rich popup (left-click) plus a dark-themed right-click menu.
+5. **Overlay polish** — rounded gradient HUD pill (orb + reactive waveform + blinking caret),
+   click-through HUD, interactive OnCall panel, and `CopyRequested` wired to the live text.
+6. **4-language UI** (zh/en/ja/ko) ported from `L10n.swift`; **app/tray icon** generated at runtime.
+
+> A hidden launch hook `VIBEXASR_OPEN=settings|history|popup|overlay[:oncall]` opens a single
+> surface at startup (skips the engine) — handy for screenshots, and the seam for a future
+> single-instance "show Settings".
+
+## Building it here (notes)
+
+The published artifacts are in [`dist/win-x64/`](dist/) and `dist/win-arm64/` (self-contained
+single-file `VibeXASR.exe` + native `onnxruntime.dll` / `sherpa-onnx-c-api.dll`).
+
+> **Per-user .NET SDK:** this machine had only .NET *runtimes*, no SDK. A machine-wide
+> `winget` SDK install hangs on a UAC prompt in a non-interactive shell, so the SDK was
+> installed per-user via `dotnet-install.ps1 -Channel 8.0 -InstallDir $env:USERPROFILE\.dotnet`
+> (no admin). Build/publish with that `dotnet.exe` and `DOTNET_ROOT=$env:USERPROFILE\.dotnet`.

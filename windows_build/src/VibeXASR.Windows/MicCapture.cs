@@ -18,33 +18,65 @@ public sealed class MicCapture : IDisposable
     private BufferedWaveProvider? _buffer;
     private ISampleProvider? _resampledMono;
 
+    /// <summary>Capture from this endpoint ID. Empty/unknown => system default recording device.</summary>
+    public string? DeviceId { get; set; }
+
+    public MicCapture(string? deviceId = null) => DeviceId = deviceId;
+
     /// <summary>Raised with a 16 kHz mono float frame (length depends on capture buffer).</summary>
     public event EventHandler<float[]>? FrameAvailable;
 
     public bool IsRunning { get; private set; }
 
+    /// <summary>All active capture (microphone) endpoints: (id, friendly name).</summary>
+    public static System.Collections.Generic.List<(string Id, string Name)> Devices()
+    {
+        var list = new System.Collections.Generic.List<(string, string)>();
+        try
+        {
+            using var en = new MMDeviceEnumerator();
+            foreach (var d in en.EnumerateAudioEndPoints(DataFlow.Capture, DeviceState.Active))
+            {
+                try { list.Add((d.ID, d.FriendlyName)); } finally { d.Dispose(); }
+            }
+        }
+        catch { /* enumeration unavailable */ }
+        return list;
+    }
+
     public void Start()
     {
         if (IsRunning) return;
 
-        // Default capture (microphone) endpoint.
+        // Resolve the chosen device by ID; otherwise the user's DEFAULT recording device
+        // (Role.Console = Windows "Default Device"). NOT Role.Communications — that's the
+        // separate "Default Communication Device", often unset / a different/silent endpoint.
         var enumerator = new MMDeviceEnumerator();
-        var device = enumerator.GetDefaultAudioEndpoint(DataFlow.Capture, Role.Communications);
-
-        // TODO(win): WasapiCapture default is shared-mode, event-driven. Confirm the device's
-        // WaveFormat (sample rate, channels, IeeeFloat vs PCM) on your hardware; the resample
-        // chain below assumes we can get an ISampleProvider from whatever it produces.
-        _capture = new WasapiCapture(device)
+        MMDevice device;
+        if (!string.IsNullOrEmpty(DeviceId))
         {
-            // Lower latency = more frequent, smaller frames -> snappier partials.
-            // TODO(win): tune; 30 ms is a reasonable streaming-ASR frame.
-        };
+            try { device = enumerator.GetDevice(DeviceId); }
+            catch { device = enumerator.GetDefaultAudioEndpoint(DataFlow.Capture, Role.Console); }
+        }
+        else
+        try { device = enumerator.GetDefaultAudioEndpoint(DataFlow.Capture, Role.Console); }
+        catch { device = enumerator.GetDefaultAudioEndpoint(DataFlow.Capture, Role.Communications); }
+        Diag.Log($"mic device: \"{device.FriendlyName}\"");
+
+        _capture = new WasapiCapture(device);
 
         var srcFormat = _capture.WaveFormat;
+        Diag.Log($"mic format: {srcFormat} ({srcFormat.SampleRate}Hz {srcFormat.Channels}ch {srcFormat.BitsPerSample}bit {srcFormat.Encoding})");
+
         _buffer = new BufferedWaveProvider(srcFormat)
         {
             DiscardOnBufferOverflow = true,
             BufferDuration = TimeSpan.FromSeconds(2),
+            // CRITICAL: default is true, which makes Read() PAD WITH SILENCE to the requested
+            // size — so the "while (Read > 0)" pull loop below never ends and floods the engine
+            // with millions of zero samples, burying the real speech (→ nothing recognized).
+            // false makes Read() return only the buffered samples (0 when drained).
+            ReadFully = false,
         };
 
         // Build: source -> sample provider -> mono -> 16 kHz resample.

@@ -71,11 +71,11 @@ public sealed class StreamingAsr : IDisposable
             _recognizer.Decode(_stream);
     }
 
-    /// <summary>Current incremental hypothesis (CJK de-spaced).</summary>
+    /// <summary>Current incremental hypothesis (CJK de-spaced, edges trimmed).</summary>
     public string Partial()
     {
         var result = _recognizer.GetResult(_stream);
-        return DeSpaceCjk(result.Text ?? string.Empty);
+        return DeSpaceCjk(result.Text ?? string.Empty).Trim();
     }
 
     /// <summary>
@@ -85,21 +85,30 @@ public sealed class StreamingAsr : IDisposable
     public bool IsEndpoint() => _recognizer.IsEndpoint(_stream);
 
     /// <summary>
-    /// Finalize the current utterance: capture the text, then reset the stream so the
-    /// next utterance starts clean. Returns the de-spaced final text.
+    /// Finalize the current utterance: tell the recognizer no more audio is coming (so it
+    /// flushes the trailing tokens — without InputFinished a streaming model leaves the last
+    /// chunk undecoded), read the text, then start a fresh stream. Returns de-spaced text.
     /// </summary>
     public string Finalize()
     {
+        // Pad with a little trailing silence + signal end so the decoder drains the tail.
+        _stream.AcceptWaveform(_sampleRate, new float[_sampleRate / 2]); // 0.5 s of silence
+        _stream.InputFinished();
+        while (_recognizer.IsReady(_stream))
+            _recognizer.Decode(_stream);
+
         var text = Partial();
         ResetStream();
         return text;
     }
 
-    /// <summary>Drop the current stream and start a fresh one (utterance boundary).</summary>
+    /// <summary>Start a fresh stream (utterance boundary). A new stream is used rather than
+    /// Reset() because the previous one has had InputFinished() called on it.</summary>
     public void ResetStream()
     {
-        // sherpa supports Reset(stream); recreating is also fine and simpler to reason about.
-        _recognizer.Reset(_stream);
+        var old = _stream;
+        _stream = _recognizer.CreateStream();
+        old?.Dispose();
     }
 
     // ---- CJK de-spacing (port of the macOS post-processor) ----

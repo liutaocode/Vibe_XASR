@@ -20,6 +20,10 @@
     <AssemblyName>VibeXASR</AssemblyName>
     <ApplicationManifest>app.manifest</ApplicationManifest>
 
+    <!-- Embedded Win32 icon so Explorer / shortcuts / Add-Remove show the app mark
+         (the tray icon is drawn at runtime, but the .exe needs a real icon resource too). -->
+    <ApplicationIcon>appicon.ico</ApplicationIcon>
+
     <!-- High-DPI aware tray/overlay; configured in code via ApplicationConfiguration too. -->
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
   </PropertyGroup>
