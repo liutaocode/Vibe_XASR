@@ -26,6 +26,9 @@ windows_build/**/models/
 *.log
 /tmp/
 
+# Claude Code 本地预览配置(静态服务器,各人本地用)
+.claude/launch.json
+
 # stray local archive (do NOT commit — 1.9GB)
 /wind.zip
 
