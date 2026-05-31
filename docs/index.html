@@ -118,6 +118,17 @@
   .soon{font-size:10px;font-weight:800;color:var(--purple);background:var(--tint-purple);padding:2px 7px;border-radius:6px;margin-left:6px;letter-spacing:.02em;align-self:center}
   .trust{margin-top:18px;font-size:12.5px;color:var(--ink-soft);display:flex;align-items:center;gap:8px;flex-wrap:wrap}
   .trust svg{width:14px;height:14px;color:#22C55E;flex:0 0 auto}
+  /* open-source repo buttons */
+  .repo-links{margin-top:20px;display:flex;gap:12px;flex-wrap:wrap}
+  .repo-btn{
+    display:inline-flex;align-items:center;gap:9px;text-decoration:none;cursor:pointer;
+    background:#fff;border:1px solid var(--line);border-radius:11px;
+    padding:9px 15px;font-size:13.5px;font-weight:700;color:var(--ink-2);
+    box-shadow:var(--shadow-sm);transition:transform .18s,border-color .18s,box-shadow .18s,color .18s;
+  }
+  .repo-btn:hover{transform:translateY(-2px);border-color:#cfd6ea;color:var(--blue);box-shadow:0 12px 26px -14px rgba(40,52,110,.4)}
+  .repo-btn svg{width:16px;height:16px;flex:0 0 auto}
+  .repo-btn .arr{width:13px;height:13px;opacity:.55}
 
   @media(max-width:900px){
     .hero-grid{grid-template-columns:1fr;gap:40px}
@@ -282,7 +293,8 @@
       <a href="#modes">三种模式</a>
       <a href="#features">特性</a>
       <a href="#download">下载</a>
-      <a href="https://github.com/Gilgamesh-J/X-ASR" target="_blank" rel="noopener">GitHub</a>
+      <a href="https://github.com/Gilgamesh-J/X-ASR" target="_blank" rel="noopener">ASR 引擎</a>
+      <a href="https://github.com/liutaocode/Vibe_XASR" target="_blank" rel="noopener">工程代码</a>
     </div>
     <div class="nav-right">
       <a class="nav-feedback" href="https://github.com/liutaocode/Vibe_XASR/issues" target="_blank" rel="noopener">应用问题反馈</a>
@@ -314,10 +326,17 @@
           <span class="tx"><span class="t1">Windows 版<span class="soon">即将推出</span></span><span class="t2">敬请期待</span></span>
         </a>
       </div>
-      <div class="trust">
-        <svg viewBox="0 0 24 24" fill="currentColor" style="color:var(--ink-2)"><path d="M12 2C6.48 2 2 6.58 2 12.25c0 4.53 2.87 8.37 6.84 9.73.5.1.68-.22.68-.49 0-.24-.01-.88-.01-1.73-2.78.62-3.37-1.37-3.37-1.37-.46-1.18-1.11-1.49-1.11-1.49-.91-.64.07-.62.07-.62 1 .07 1.53 1.06 1.53 1.06.89 1.57 2.34 1.12 2.91.85.09-.66.35-1.12.63-1.38-2.22-.26-4.56-1.14-4.56-5.07 0-1.12.39-2.03 1.03-2.75-.1-.26-.45-1.3.1-2.71 0 0 .84-.28 2.75 1.05A9.34 9.34 0 0 1 12 6.84c.85 0 1.71.12 2.51.34 1.91-1.33 2.75-1.05 2.75-1.05.55 1.41.2 2.45.1 2.71.64.72 1.03 1.63 1.03 2.75 0 3.94-2.34 4.81-4.57 5.06.36.32.68.94.68 1.9 0 1.37-.01 2.48-.01 2.82 0 .27.18.6.69.49A10.03 10.03 0 0 0 22 12.25C22 6.58 17.52 2 12 2z"/></svg>
-        识别引擎已开源 ——
-        <a href="https://github.com/Gilgamesh-J/X-ASR" target="_blank" rel="noopener" style="color:var(--blue);font-weight:700;text-decoration:none">github.com/Gilgamesh-J/X-ASR</a>
+      <div class="repo-links">
+        <a class="repo-btn" href="https://github.com/Gilgamesh-J/X-ASR" target="_blank" rel="noopener" title="ASR 引擎开源仓库">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.58 2 12.25c0 4.53 2.87 8.37 6.84 9.73.5.1.68-.22.68-.49 0-.24-.01-.88-.01-1.73-2.78.62-3.37-1.37-3.37-1.37-.46-1.18-1.11-1.49-1.11-1.49-.91-.64.07-.62.07-.62 1 .07 1.53 1.06 1.53 1.06.89 1.57 2.34 1.12 2.91.85.09-.66.35-1.12.63-1.38-2.22-.26-4.56-1.14-4.56-5.07 0-1.12.39-2.03 1.03-2.75-.1-.26-.45-1.3.1-2.71 0 0 .84-.28 2.75 1.05A9.34 9.34 0 0 1 12 6.84c.85 0 1.71.12 2.51.34 1.91-1.33 2.75-1.05 2.75-1.05.55 1.41.2 2.45.1 2.71.64.72 1.03 1.63 1.03 2.75 0 3.94-2.34 4.81-4.57 5.06.36.32.68.94.68 1.9 0 1.37-.01 2.48-.01 2.82 0 .27.18.6.69.49A10.03 10.03 0 0 0 22 12.25C22 6.58 17.52 2 12 2z"/></svg>
+          ASR 引擎开源
+          <svg class="arr" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17 17 7M9 7h8v8"/></svg>
+        </a>
+        <a class="repo-btn" href="https://github.com/liutaocode/Vibe_XASR" target="_blank" rel="noopener" title="工程代码开源仓库">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.58 2 12.25c0 4.53 2.87 8.37 6.84 9.73.5.1.68-.22.68-.49 0-.24-.01-.88-.01-1.73-2.78.62-3.37-1.37-3.37-1.37-.46-1.18-1.11-1.49-1.11-1.49-.91-.64.07-.62.07-.62 1 .07 1.53 1.06 1.53 1.06.89 1.57 2.34 1.12 2.91.85.09-.66.35-1.12.63-1.38-2.22-.26-4.56-1.14-4.56-5.07 0-1.12.39-2.03 1.03-2.75-.1-.26-.45-1.3.1-2.71 0 0 .84-.28 2.75 1.05A9.34 9.34 0 0 1 12 6.84c.85 0 1.71.12 2.51.34 1.91-1.33 2.75-1.05 2.75-1.05.55 1.41.2 2.45.1 2.71.64.72 1.03 1.63 1.03 2.75 0 3.94-2.34 4.81-4.57 5.06.36.32.68.94.68 1.9 0 1.37-.01 2.48-.01 2.82 0 .27.18.6.69.49A10.03 10.03 0 0 0 22 12.25C22 6.58 17.52 2 12 2z"/></svg>
+          工程代码开源
+          <svg class="arr" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17 17 7M9 7h8v8"/></svg>
+        </a>
       </div>
     </div>
 
@@ -462,7 +481,9 @@
         <span class="div"></span>
         <span>即将支持 Windows</span>
         <span class="div"></span>
-        <a href="https://github.com/Gilgamesh-J/X-ASR" target="_blank" rel="noopener" style="color:#fff;font-weight:700;text-decoration:underline;text-underline-offset:3px">识别引擎已开源 ↗</a>
+        <a href="https://github.com/Gilgamesh-J/X-ASR" target="_blank" rel="noopener" style="color:#fff;font-weight:700;text-decoration:underline;text-underline-offset:3px">ASR 引擎开源 ↗</a>
+        <span class="div"></span>
+        <a href="https://github.com/liutaocode/Vibe_XASR" target="_blank" rel="noopener" style="color:#fff;font-weight:700;text-decoration:underline;text-underline-offset:3px">工程代码开源 ↗</a>
       </div>
     </div>
   </div>
@@ -481,7 +502,8 @@
       <a href="#modes">三种模式</a>
       <a href="#features">特性</a>
       <a href="#download">下载</a>
-      <a href="https://github.com/Gilgamesh-J/X-ASR" target="_blank" rel="noopener">GitHub</a>
+      <a href="https://github.com/Gilgamesh-J/X-ASR" target="_blank" rel="noopener">ASR 引擎开源</a>
+      <a href="https://github.com/liutaocode/Vibe_XASR" target="_blank" rel="noopener">工程代码开源</a>
     </div>
   </div>
 </footer>
