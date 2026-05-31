@@ -726,11 +726,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     private func stopOnCall() {
         guard onCallActive else { return }
-        onCallActive = false
         stopElapsedTimer()
         mic.stop()
-        engine?.endSession()
-        engine?.holdToTalk = true            // restore push-to-talk default
+        // Commit any in-flight sentence (VAD hadn't reached silence, ASR still
+        // streaming a partial). endSession() flushes it via onFinal — but the normal
+        // OnCall handler is guarded on onCallActive (which we clear below) and
+        // dispatches async (runs too late). So capture the final SYNCHRONOUSLY here,
+        // mirroring stopTrySession(), or the last sentence is lost.
+        if let engine {
+            engine.onPartial = nil
+            engine.onFinal = { [weak self] text in
+                guard let self else { return }
+                let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !t.isEmpty else { return }
+                self.history.append(text, mode: "oncall", ephemeral: !self.store.historyEnabled)
+                self.onCallLog.entries.append(HistoryItem(id: UUID(), text: t, date: Date(), mode: "oncall"))
+            }
+            engine.endSession()
+            engine.onFinal = nil
+            engine.holdToTalk = true         // restore push-to-talk default
+        }
+        onCallActive = false
         onCallPanel?.orderOut(nil)
         hudModel.reset()
         setStatusIcon(engineReady ? "🎙" : "⏳")
@@ -756,6 +772,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             setStatusIcon("📞")
         } else {
             mic.stop()
+            // Commit the in-flight sentence instead of freezing/dropping it. onCallActive
+            // is still true, so the normal onFinal handler records it; the next resume
+            // begins a fresh sentence on the first speech onset.
+            engine?.endSession()
             onCallLog.paused = true
             setStatusIcon("⏸")
         }
