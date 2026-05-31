@@ -171,15 +171,17 @@
   .oc-foot button:not(:last-child){border-right:1px solid var(--line-2)}
   .oc-foot button svg{width:17px;height:17px}
   .oc-foot button:hover{color:var(--blue);background:var(--tint-blue)}
-  /* menubar chip */
+  /* menubar chip — anchored to the OnCall card's top-right corner */
+  .oncall-wrap{position:relative;z-index:2;width:min(420px,100%)}
   .menubar{
-    position:absolute;top:18px;right:0;z-index:3;display:flex;align-items:center;gap:7px;
+    position:absolute;top:-20px;right:-14px;z-index:4;display:flex;align-items:center;gap:7px;
     background:#fff;border:1px solid var(--line);border-radius:12px;padding:8px 13px;
     box-shadow:var(--shadow);font-size:12.5px;font-weight:600;color:var(--ink-2);
   }
   .menubar .mic{width:24px;height:24px;border-radius:7px;background:var(--grad);display:grid;place-items:center}
   .menubar .mic svg{width:13px;height:13px}
-  @media(max-width:900px){.menubar{display:none}.stage{min-height:auto}}
+  @media(max-width:540px){.menubar{display:none}}
+  @media(max-width:900px){.stage{min-height:auto}}
 
   /* ===== SECTION SHELL ===== */
   .sec{padding:74px 0}
@@ -343,6 +345,7 @@
     <!-- ONCALL MOCK -->
     <div class="stage">
       <div class="glow"></div>
+      <div class="oncall-wrap">
       <div class="menubar">
         <span class="mic"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="11" rx="3"/><path d="M5 10a7 7 0 0 0 14 0"/><path d="M12 17v4"/></svg></span>
         快捷键一键听写
@@ -367,6 +370,7 @@
           <button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="9" y1="5" x2="9" y2="19"/><line x1="15" y1="5" x2="15" y2="19"/></svg>暂停</button>
           <button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>停止</button>
         </div>
+      </div>
       </div>
     </div>
   </div>
