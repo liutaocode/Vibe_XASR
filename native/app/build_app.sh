@@ -30,17 +30,18 @@ APP_SRC="$B/native/app"
 DIST="$B/native/dist"
 APP="$DIST/Vibe XASR.app"
 
-SHERPA_LIB="$B/native/sherpa/dist/sherpa-onnx-v1.13.2-osx-arm64-shared/lib"
+SHERPA_LIB="$B/native/sherpa/dist/sherpa-onnx-v1.13.2-osx-universal2-shared/lib"
+ARCHS="--arch arm64 --arch x86_64"               # universal2 (Apple Silicon + Intel)
 ASR_SRC="$B/../vad_asr_demo/models/asr"          # encoder/decoder/joiner-960ms + tokens
 FIRED_SRC="$B/models/firered"
 UI_SRC="$B/ui"
 ENTITLEMENTS="$APP_SRC/Resources/VibeIME.entitlements"
 INFO_PLIST="$APP_SRC/Resources/Info.plist"
 
-echo "== [1/6] swift build -c release =="
+echo "== [1/6] swift build -c release (universal2) =="
 cd "$APP_SRC"
-swift build -c release
-EXEC="$(swift build -c release --show-bin-path)/VibeIME"
+swift build -c release $ARCHS
+EXEC="$(swift build -c release $ARCHS --show-bin-path)/VibeIME"
 [ -x "$EXEC" ] || { echo "ERROR: built exec not found at $EXEC"; exit 1; }
 echo "   built: $EXEC"
 
@@ -88,10 +89,10 @@ echo "== [5/6] fix rpaths (drop the dev-tree fallback so the bundle is self-cont
 # absolute source-tree rpath so the shipped app does not depend on the build dir.
 # (Ignore failure if it was already absent.)
 install_name_tool -delete_rpath "$SHERPA_LIB" "$APP/Contents/MacOS/VibeIME" 2>/dev/null || true
-# Ensure the bundle rpath is present (it should be; add if missing).
-if ! otool -l "$APP/Contents/MacOS/VibeIME" | grep -q "@executable_path/../Frameworks"; then
-  install_name_tool -add_rpath "@executable_path/../Frameworks" "$APP/Contents/MacOS/VibeIME"
-fi
+# Ensure the bundle rpath is present (Package.swift already adds it). Tolerate the
+# "already present" case — harmless, and for a universal binary the otool guard
+# could misfire and try to re-add it.
+install_name_tool -add_rpath "@executable_path/../Frameworks" "$APP/Contents/MacOS/VibeIME" 2>/dev/null || true
 
 echo "== [6/6] ad-hoc sign (hardened runtime + entitlements) =="
 # AMFI's entitlements parser rejects XML comments, so normalize the entitlements

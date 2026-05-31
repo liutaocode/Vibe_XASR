@@ -1,10 +1,10 @@
-# Vibe XASR — 本地语音输入法 (macOS · Apple Silicon)
+# Vibe XASR — 本地语音输入法 (macOS · Universal)
 
 按住热键说话,文字直接落到光标处。**100% 本地、离线、不上云**。
 原生 Swift app,内置 [X-ASR](https://github.com/Gilgamesh-J/X-ASR) 流式中英识别 + FireRedVAD,
-经 Developer ID 签名 + Apple 公证,可直接分发安装。
+**universal2 通用二进制(Apple Silicon + Intel)**,经 Developer ID 签名 + Apple 公证,可直接分发安装。
 
-> 当前版本 **v1.0.0**。架构图见 [`docs/architecture.html`](docs/architecture.html)。
+> 当前版本 **v1.1.0**(通用版,支持 Intel Mac)。架构图见 [`docs/architecture.html`](docs/architecture.html)。
 
 ## 功能
 

@@ -15,7 +15,7 @@ let B   = "/path/to/xasr_workspace/xasr_macos_build"
 let KNF = "\(B)/native/third_party/kaldi-native-fbank"      // include root for "kaldi-native-fbank/csrc/*.h"
 let KISS = "\(B)/native/third_party/kissfft"                // kiss_fft.h / kiss_fftr.h
 let ORT_INC = "\(B)/native/third_party/onnxruntime/include" // 1.22 headers OK to compile against
-let SHERPA_LIB = "\(B)/native/sherpa/dist/sherpa-onnx-v1.13.2-osx-arm64-shared/lib"
+let SHERPA_LIB = "\(B)/native/sherpa/dist/sherpa-onnx-v1.13.2-osx-universal2-shared/lib"
 
 let package = Package(
     name: "VibeIME",
