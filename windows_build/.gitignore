@@ -1,0 +1,14 @@
+# Build output
+bin/
+obj/
+dist/
+
+# Models are fetched from HuggingFace, never committed
+models/
+*.onnx
+tokens.txt
+
+# IDE / OS cruft
+.vs/
+*.user
+.DS_Store

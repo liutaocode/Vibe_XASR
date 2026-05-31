@@ -1,0 +1,1063 @@
+import AppKit
+import AVFoundation
+import SwiftUI
+import VibeUI
+import Sparkle
+import os
+
+/// Vibe XASR — menu-bar (LSUIElement-capable) push-to-talk dictation app.
+///
+/// Wiring:
+///   * NSStatusItem (🎙 / ⏳ loading / 🔴 listening / ✍️ working) + menu.
+///   * DictationEngine(vad: <FireRed|Silero>, asr: SherpaASR(tier), prerollSec: 1.0)
+///     loaded on a background queue (~3 s); logs "engine ready" to stderr when done.
+///   * Transparent non-activating always-on-top HUD NSPanel hosting HUDView.
+///   * Hotkey (right-⌘) push-to-talk: hold → listen + stream partials; release →
+///     finalize + paste/type the joined sentences (+ optional Pad/History append).
+///   * Live engine swap when the VAD kind or latency tier changes (off the audio
+///     path, on the main actor), with a brief "切换中…" state in Settings.
+@MainActor
+final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
+
+    // MARK: UI
+    private var statusItem: NSStatusItem!
+    private let hudModel = HUDModel()
+    /// Separate model driven ONLY by the in-window onboarding "try it" session,
+    /// so the floating HUD panel (bound to `hudModel`) never shows during a try.
+    private let tryHUD = HUDModel()
+    private var hudPanel: NSPanel!
+    private var settingsWindow: NSWindow?
+    private var onboardingWindow: NSWindow?
+    private var padWindow: NSWindow?
+    private var historyWindow: NSWindow?
+    private var statusMenuItem: NSMenuItem!
+    private var dockToggleItem: NSMenuItem!
+    // Held so the menu can be re-localized live when the UI language changes.
+    private var settingsItem: NSMenuItem!
+    private var padItem: NSMenuItem!
+    private var historyItem: NSMenuItem!
+    private var rerunItem: NSMenuItem!
+    private var updateItem: NSMenuItem!
+    private var quitItem: NSMenuItem!
+
+    // MARK: Auto-update (Sparkle)
+    /// Drives the appcast check / download / verify / install. `startingUpdater: true`
+    /// kicks off the scheduled background checks per Info.plist (SUEnableAutomaticChecks).
+    private let updaterController = SPUStandardUpdaterController(
+        startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil)
+
+    // MARK: Settings (single source of truth)
+    private let store = SettingsStore.shared
+    private let history = HistoryStore.shared
+    private let pad = PadStore.shared
+    private let downloader = ModelDownloader.shared
+
+    // MARK: Engine
+    private var engine: DictationEngine?
+    private let mic = Mic()
+    private var hotkey: Hotkey                 // recreated when the keycode changes
+    private var engineReady = false
+    /// True while a VAD/tier swap is rebuilding the engine (Settings shows 切换中…).
+    private(set) var engineSwapping = false
+
+    override init() {
+        let s = SettingsStore.shared
+        self.hotkey = Hotkey(keycode: CGKeyCode(s.hotkeyKeyCode),
+                             modifierOnly: s.hotkeyModifierOnly)
+        super.init()
+    }
+
+    // MARK: Dictation pass state
+    /// Robust streaming inserter — one-char Unicode keystrokes on a serial queue
+    /// (replaces the old chunked typeOut that dropped characters).
+    private let inserter = StreamingInserter()
+    private var elapsedTimer: Timer?
+    private var sessionStart: Date?
+    private var hideWorkItem: DispatchWorkItem?
+
+    // MARK: Onboarding "try it" state
+    private var inTry = false
+    private var onboardingActive = false
+
+    // ============================================================
+    // App lifecycle
+    // ============================================================
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        // Hook VibeUI's runtime localization to the persisted choice.
+        L10n.shared.persistence = store
+
+        NSApp.setActivationPolicy(store.showDockIcon ? .regular : .accessory)
+        setupStatusItem()
+        setupHUDPanel()
+        loadEngine()
+        wireHotkey()
+        _ = hotkey.start()
+
+        observeSettings()
+        applyLaunchAtLogin()   // reconcile the login item with the stored pref
+
+        if !store.didCompleteOnboarding {
+            openOnboarding()
+        }
+    }
+
+    /// React to store mutations posted from Settings / onboarding / menu.
+    private func observeSettings() {
+        let nc = NotificationCenter.default
+        nc.addObserver(forName: SettingsStore.hotkeyChanged, object: nil, queue: .main) {
+            [weak self] _ in
+            MainActor.assumeIsolated { self?.restartHotkey() }
+        }
+        nc.addObserver(forName: SettingsStore.dockIconChanged, object: nil, queue: .main) {
+            [weak self] _ in
+            MainActor.assumeIsolated { self?.applyDockPolicy() }
+        }
+        nc.addObserver(forName: SettingsStore.engineConfigChanged, object: nil, queue: .main) {
+            [weak self] _ in
+            MainActor.assumeIsolated { self?.rebuildEngineForConfig() }
+        }
+        nc.addObserver(forName: SettingsStore.launchAtLoginChanged, object: nil, queue: .main) {
+            [weak self] _ in
+            MainActor.assumeIsolated { self?.applyLaunchAtLogin() }
+        }
+        // When a download finishes, if the just-completed tier is the one the
+        // user selected, swap the engine onto it.
+        nc.addObserver(forName: SettingsStore.changed, object: nil, queue: .main) { _ in }
+    }
+
+    /// Apply the current Dock-icon preference live + keep the menu toggle synced.
+    private func applyDockPolicy() {
+        NSApp.setActivationPolicy(store.showDockIcon ? .regular : .accessory)
+        dockToggleItem?.state = store.showDockIcon ? .on : .off
+        if store.showDockIcon,
+           settingsWindow != nil || onboardingWindow != nil
+            || padWindow != nil || historyWindow != nil {
+            NSApp.activate(ignoringOtherApps: true)
+        }
+    }
+
+    /// Tear down + recreate the global key listener for a new keycode (live).
+    private func restartHotkey() {
+        hotkey.stop()
+        hotkey = Hotkey(keycode: CGKeyCode(store.hotkeyKeyCode),
+                        modifierOnly: store.hotkeyModifierOnly)
+        wireHotkey()
+        _ = hotkey.start()
+    }
+
+    /// Clicking the Dock icon with no window open → show Settings.
+    func applicationShouldHandleReopen(_ sender: NSApplication,
+                                       hasVisibleWindows flag: Bool) -> Bool {
+        if !flag {
+            if onboardingWindow != nil {
+                onboardingWindow?.makeKeyAndOrderFront(nil)
+                NSApp.activate(ignoringOtherApps: true)
+            } else {
+                openSettings()
+            }
+        }
+        return true
+    }
+
+    // ============================================================
+    // Status bar + menu
+    // ============================================================
+
+    private func setupStatusItem() {
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        statusItem.button?.title = "⏳"
+
+        let menu = NSMenu()
+        statusMenuItem = NSMenuItem(title: L10n.shared.t("menu.loading"), action: nil, keyEquivalent: "")
+        statusMenuItem.isEnabled = false
+        menu.addItem(statusMenuItem)
+        menu.addItem(.separator())
+
+        dockToggleItem = NSMenuItem(title: L10n.shared.t("menu.showDock"),
+                                    action: #selector(toggleDockIcon), keyEquivalent: "")
+        dockToggleItem.target = self
+        dockToggleItem.state = store.showDockIcon ? .on : .off
+        menu.addItem(dockToggleItem)
+        menu.addItem(.separator())
+
+        settingsItem = NSMenuItem(title: L10n.shared.t("menu.settings"),
+                                  action: #selector(openSettings), keyEquivalent: ",")
+        settingsItem.target = self
+        menu.addItem(settingsItem)
+
+        // NEW: Pad + History entries (alongside Settings…).
+        padItem = NSMenuItem(title: L10n.shared.t("menu.pad"),
+                             action: #selector(openPad), keyEquivalent: "")
+        padItem.target = self
+        menu.addItem(padItem)
+
+        historyItem = NSMenuItem(title: L10n.shared.t("menu.history"),
+                                 action: #selector(openHistory), keyEquivalent: "")
+        historyItem.target = self
+        menu.addItem(historyItem)
+
+        rerunItem = NSMenuItem(title: L10n.shared.t("menu.rerun"),
+                               action: #selector(rerunOnboarding), keyEquivalent: "")
+        rerunItem.target = self
+        menu.addItem(rerunItem)
+
+        updateItem = NSMenuItem(title: L10n.shared.t("about.checkUpdate"),
+                                action: #selector(checkForUpdatesMenu), keyEquivalent: "")
+        updateItem.target = self
+        menu.addItem(updateItem)
+
+        menu.addItem(.separator())
+
+        quitItem = NSMenuItem(title: L10n.shared.t("menu.quit"), action: #selector(quit), keyEquivalent: "q")
+        quitItem.target = self
+        menu.addItem(quitItem)
+
+        statusItem.menu = menu
+    }
+
+    /// Re-apply localized titles to the native menu when the UI language changes
+    /// (the AppKit NSMenu isn't a SwiftUI view, so it can't observe L10n itself).
+    private func relocalizeMenu() {
+        dockToggleItem?.title = L10n.shared.t("menu.showDock")
+        settingsItem?.title = L10n.shared.t("menu.settings")
+        padItem?.title = L10n.shared.t("menu.pad")
+        historyItem?.title = L10n.shared.t("menu.history")
+        rerunItem?.title = L10n.shared.t("menu.rerun")
+        updateItem?.title = L10n.shared.t("about.checkUpdate")
+        quitItem?.title = L10n.shared.t("menu.quit")
+        // Refresh the dynamic status line if the engine is already up.
+        if engineReady { statusMenuItem?.title = L10n.shared.t("menu.ready") }
+        else if !engineSwapping { statusMenuItem?.title = L10n.shared.t("menu.loading") }
+    }
+
+    @objc private func toggleDockIcon() {
+        store.showDockIcon.toggle()   // posts dockIconChanged → applyDockPolicy()
+    }
+
+    private func setStatusIcon(_ icon: String) {
+        statusItem.button?.title = icon
+    }
+
+    @objc private func quit() {
+        NSApp.terminate(nil)
+    }
+
+    /// Status-menu "检查更新" → Sparkle user-initiated check.
+    @objc private func checkForUpdatesMenu() {
+        checkForUpdates()
+    }
+
+    @objc private func openSettings() {
+        if let w = settingsWindow {
+            w.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+        // Pass `self` as the SettingsBridge + the observable ModelDownloader so
+        // the Model tab shows live download progress and the engine swaps live.
+        let hosting = NSHostingController(rootView:
+            SettingsView(bridge: self, manager: downloader,
+                         records: AnyView(HistoryView(store: HistoryStore.shared))))
+        let window = NSWindow(contentViewController: hosting)
+        window.title = L10n.shared.t("settings.window.title")
+        // Plain NATIVE title bar: "偏好设置" + traffic lights on ONE row. The earlier
+        // transparent-titlebar + fullSizeContentView + custom strip approach rendered
+        // as two rows; this avoids it entirely.
+        window.styleMask = [.titled, .closable, .miniaturizable]
+        window.setContentSize(NSSize(width: 640, height: 560))
+        window.isReleasedWhenClosed = false
+        window.center()
+        window.delegate = self
+        settingsWindow = window
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    // ============================================================
+    // Pad + History windows (NEW)
+    // ============================================================
+
+    @objc private func openPad() {
+        if let w = padWindow {
+            w.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+        let hosting = NSHostingController(rootView: PadView(store: pad))
+        let window = NSWindow(contentViewController: hosting)
+        window.title = L10n.shared.t("pad.title")
+        window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+        window.setContentSize(NSSize(width: 520, height: 460))
+        window.isReleasedWhenClosed = false
+        window.center()
+        window.delegate = self
+        padWindow = window
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    @objc private func openHistory() {
+        if let w = historyWindow {
+            w.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+        let hosting = NSHostingController(rootView: HistoryView(store: history))
+        let window = NSWindow(contentViewController: hosting)
+        window.title = L10n.shared.t("history.title")
+        window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+        window.setContentSize(NSSize(width: 540, height: 480))
+        window.isReleasedWhenClosed = false
+        window.center()
+        window.delegate = self
+        historyWindow = window
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    // ============================================================
+    // Onboarding wizard
+    // ============================================================
+
+    @objc private func rerunOnboarding() {
+        openOnboarding()
+    }
+
+    private func openOnboarding() {
+        if let w = onboardingWindow {
+            w.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+        let hosting = NSHostingController(rootView: OnboardingView(bridge: self))
+        let window = NSWindow(contentViewController: hosting)
+        window.title = "Vibe XASR"
+        window.styleMask = [.titled, .closable]
+        window.setContentSize(NSSize(width: 560, height: 460))
+        window.isReleasedWhenClosed = false
+        window.center()
+        window.delegate = self
+        onboardingWindow = window
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func closeOnboarding() {
+        onboardingWindow?.close()
+        onboardingWindow = nil
+    }
+
+    // ============================================================
+    // HUD overlay panel
+    // ============================================================
+
+    private func setupHUDPanel() {
+        let panel = NSPanel(
+            contentRect: NSRect(x: 0, y: 0, width: 640, height: 120),
+            styleMask: [.nonactivatingPanel, .borderless],
+            backing: .buffered,
+            defer: false
+        )
+        panel.level = .floating
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        panel.backgroundColor = .clear
+        panel.isOpaque = false
+        panel.hasShadow = false
+        panel.ignoresMouseEvents = true
+        panel.isMovableByWindowBackground = false
+        panel.hidesOnDeactivate = false
+
+        let hosting = NSHostingView(rootView:
+            HUDView(model: hudModel, form: .compact)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        )
+        hosting.frame = panel.contentView!.bounds
+        hosting.autoresizingMask = [.width, .height]
+        panel.contentView = hosting
+
+        hudPanel = panel
+        positionHUD()
+    }
+
+    private func positionHUD(topRight: Bool = false) {
+        guard let screen = NSScreen.main else { return }
+        let vis = screen.visibleFrame
+        let size = hudPanel.frame.size
+        if topRight {                                  // OnCall: persistent top-right
+            hudPanel.setFrameOrigin(NSPoint(x: vis.maxX - size.width - 20,
+                                            y: vis.maxY - size.height - 12))
+        } else {                                       // push-to-talk: bottom-center
+            hudPanel.setFrameOrigin(NSPoint(x: vis.midX - size.width / 2,
+                                            y: vis.minY + 120))
+        }
+    }
+
+    private func showHUD() {
+        hideWorkItem?.cancel()
+        positionHUD()
+        hudPanel.orderFrontRegardless()
+    }
+
+    private func hideHUD(after seconds: TimeInterval) {
+        hideWorkItem?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            self?.hudPanel.orderOut(nil)
+            self?.hudModel.reset()
+        }
+        hideWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + seconds, execute: work)
+    }
+
+    // ============================================================
+    // Engine loading + live swap (background)
+    // ============================================================
+
+    private func loadEngine() {
+        rebuildEngine(announceReady: true)
+    }
+
+    /// Build (or rebuild) the engine from the current store config — chosen VAD
+    /// kind + latency tier. Runs the model load on a background queue and swaps
+    /// the engine in on the main actor when ready. Safe to call repeatedly.
+    private func rebuildEngine(announceReady: Bool) {
+        let vadKind = store.vadKind
+        let tier = store.latencyTierEnum
+        // Resolve the ASR dir for the chosen tier. If it isn't available yet
+        // (a non-bundled tier that hasn't finished downloading), fall back to the
+        // bundled 960 ms so dictation keeps working, and kick off the download.
+        let resolvedTier: String
+        let asrDir: String
+        if let dir = ModelPaths.asrDir(forTier: tier.token) {
+            resolvedTier = tier.token
+            asrDir = dir
+        } else {
+            resolvedTier = ModelPaths.bundledTier
+            asrDir = ModelPaths.bundledAsrDir()
+            downloader.startDownload(tier)   // fetch the requested tier in the background
+        }
+        let vadDir = ModelPaths.firedDir()
+        let sileroPath = ModelPaths.sileroModelPath()
+
+        FileHandle.standardError.write(
+            "[VibeIME] building engine  vad=\(vadKind) tier=\(resolvedTier) asr=\(asrDir)\n".data(using: .utf8)!)
+
+        if !announceReady {
+            engineSwapping = true
+            statusMenuItem.title = L10n.shared.t("switching")
+        }
+
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            // Build the chosen VAD; fall back to FireRedVAD if silero is missing.
+            let vad: StreamingVAD?
+            if vadKind == "silero" {
+                if let s = SileroVAD(modelPath: sileroPath) {
+                    vad = s
+                } else {
+                    FileHandle.standardError.write(
+                        "[VibeIME] silero model missing → falling back to FireRedVAD\n".data(using: .utf8)!)
+                    vad = FireRedVAD(modelDir: vadDir)
+                }
+            } else {
+                vad = FireRedVAD(modelDir: vadDir)
+            }
+            guard let vad else {
+                self?.engineFailed("VAD 模型加载失败 / VAD model failed", dir: vadDir)
+                return
+            }
+            guard ModelPaths.tierFilesPresent(asrDir, tier: resolvedTier) else {
+                self?.engineFailed("ASR 模型文件缺失 / ASR model missing", dir: asrDir)
+                return
+            }
+            let asr = SherpaASR(asrDir: asrDir, tier: resolvedTier)
+            let engine = DictationEngine(vad: vad, asr: asr, prerollSec: 1.0)
+
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.engine = engine
+                self.engineReady = true
+                self.engineSwapping = false
+                self.setStatusIcon("🎙")
+                self.statusMenuItem.title = L10n.shared.t("menu.ready")
+                // (Re)start OnCall on this (possibly newly-swapped) engine if selected.
+                if self.onCallActive { self.onCallActive = false; self.mic.stop() }
+                self.applyDictationMode()
+                if announceReady {
+                    FileHandle.standardError.write("engine ready\n".data(using: .utf8)!)
+                } else {
+                    FileHandle.standardError.write("engine swapped\n".data(using: .utf8)!)
+                }
+            }
+        }
+    }
+
+    /// Called when the VAD kind or latency tier changes. Rebuilds the engine off
+    /// the audio path (only while not mid-dictation), showing a brief swap state.
+    private func rebuildEngineForConfig() {
+        // Don't yank the engine out from under an in-flight capture; the change
+        // applies on the next rebuild. In practice the picker is in Settings, so
+        // the user isn't holding the hotkey simultaneously.
+        guard !inTry, hudModel.phase == .idle else {
+            // Defer until idle.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
+                self?.rebuildEngineForConfig()
+            }
+            return
+        }
+        rebuildEngine(announceReady: false)
+    }
+
+    nonisolated private func engineFailed(_ message: String, dir: String) {
+        FileHandle.standardError.write(
+            "[VibeIME] ENGINE LOAD FAILED: \(message) (\(dir))\n".data(using: .utf8)!)
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.engineSwapping = false
+            self.setStatusIcon("⚠️")
+            self.statusMenuItem.title = message
+        }
+    }
+
+    // ============================================================
+    // Hotkey + mic + engine callbacks
+    // ============================================================
+
+    private func wireHotkey() {
+        hotkey.onDown = { [weak self] in
+            DispatchQueue.main.async { self?.beginDictation() }
+        }
+        hotkey.onUp = { [weak self] in
+            DispatchQueue.main.async { self?.endDictation() }
+        }
+
+        mic.onSamples = { [weak self] samples in
+            guard let self else { return }
+            self.engine?.feed(samples)
+            let level = AppDelegate.rmsLevel(samples)
+            DispatchQueue.main.async {
+                if self.inTry {
+                    if self.tryHUD.phase != .idle { self.tryHUD.level = level }
+                } else if self.hudModel.phase != .idle {
+                    self.hudModel.level = level
+                }
+            }
+        }
+    }
+
+    private func beginDictation() {
+        guard !onboardingActive, !inTry, !onCallActive else { return }
+        guard engineReady, let engine else { return }
+        inserter.reset()
+
+        engine.onPartial = { [weak self] text in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.hudModel.partialText = text
+                self.hudModel.phase = .speaking
+                // Streaming insertion: type the recognized text into the focused app
+                // AS IT ARRIVES (diff vs what we've already typed). "type" path only —
+                // "paste" inserts the whole final once on release.
+                if self.store.insertMethod == "type" { self.inserter.update(text) }
+            }
+        }
+        engine.onFinal = { [weak self] text in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                // Insert + record happen HERE, where `text` is the real final. (The
+                // old code read a buffer synchronously in endDictation before this
+                // async ran → empty text → no insert, no history. That was the bug.)
+                self.recordFinal(text)
+                self.hudModel.partialText = text
+                if self.store.insertMethod == "type" {
+                    self.inserter.update(text)     // final correction of the tail
+                    if self.store.clipboardOverwrite { Paste.setClipboard(text) }
+                } else {
+                    Paste.insert(text, restore: !self.store.clipboardOverwrite)
+                }
+            }
+        }
+
+        hudModel.reset()
+        hudModel.phase = .empty
+        hudModel.elapsed = "0:00"
+        sessionStart = Date()
+        startElapsedTimer()
+        // 逐字 (streaming) mode types straight into the focused app — no overlay (the
+        // 60fps HUD competed for the main thread and could drop keystrokes). The
+        // one-shot "paste" mode still shows the HUD so you can preview before release.
+        if store.insertMethod != "type" { showHUD() }
+        setStatusIcon("🔴")
+
+        engine.startSession()
+        do {
+            try mic.start()
+        } catch {
+            stopElapsedTimer()
+            hudModel.fail(icon: "🎙", title: L10n.shared.t("hud.micFail"), reason: "\(error.localizedDescription)")
+            showHUD()   // always surface mic errors, even in no-HUD streaming mode
+            setStatusIcon("🎙")
+            hideHUD(after: 1.5)
+        }
+    }
+
+    private func endDictation() {
+        guard !onboardingActive, !inTry, !onCallActive else { return }
+        guard engineReady else { return }
+        mic.stop()
+        stopElapsedTimer()
+        setStatusIcon("✍️")
+        hudModel.phase = .finalizing
+
+        // endSession() finalizes the utterance and fires onFinal on the main queue,
+        // which performs the insert (streamed or one-shot paste) AND records history.
+        // Do NOT read a buffer synchronously here — onFinal hasn't run yet (that race
+        // was the "shows text but never inserts / history empty" bug).
+        engine?.endSession()
+        hudModel.phase = .done
+        setStatusIcon(engineReady ? "🎙" : "⏳")
+        hideHUD(after: 0.8)
+    }
+
+    /// Append a final to history (if enabled) + the Pad (if enabled).
+    private func recordFinal(_ text: String) {
+        // Always record. When history saving is OFF the entry is ephemeral (kept 60s
+        // with a countdown, never persisted) so a long unsaved dictation isn't lost.
+        history.append(text, ephemeral: !store.historyEnabled)
+    }
+
+    // ============================================================
+    // OnCall — always-on hands-free dictation (持续候机)
+    // ============================================================
+
+    private var onCallActive = false
+
+    /// Start/stop the always-on OnCall session to match the selected mode. Called
+    /// when the engine becomes ready and whenever the dictation mode changes.
+    private func applyDictationMode() {
+        guard engineReady else { return }
+        if store.insertMethod == "oncall" { startOnCall() } else { stopOnCall() }
+    }
+
+    private var onCallPanel: NSPanel?
+    private var onCallSessionWindow: NSWindow?
+    /// Live log of the CURRENT OnCall session (cleared on each start). Copy, the
+    /// session viewer, and export all read from this — not the whole history.
+    private let onCallLog = OnCallLog()
+    /// The dictation mode active before OnCall was selected — restored on stop.
+    private var modeBeforeOnCall = "paste"
+
+    private func setupOnCallPanel() {
+        let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 300, height: 172),
+                            styleMask: [.nonactivatingPanel, .borderless],
+                            backing: .buffered, defer: false)
+        panel.level = .floating
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        panel.backgroundColor = .clear
+        panel.isOpaque = false
+        panel.hasShadow = false
+        panel.ignoresMouseEvents = false      // interactive: Copy / Stop buttons
+        panel.isMovableByWindowBackground = true   // drag it anywhere
+        panel.hidesOnDeactivate = false
+        let view = OnCallOverlay(
+            model: hudModel,
+            log: onCallLog,
+            onCopy: { [weak self] in
+                guard let self else { return }
+                Paste.setClipboard(self.onCallClipboardText())   // CURRENT session (ts + text)
+            },
+            onView: { [weak self] in self?.openOnCallSession() },
+            onPause: { [weak self] in self?.toggleOnCallPause() },
+            onStop: { [weak self] in self?.confirmStopOnCall() })
+        let hosting = NSHostingView(rootView: view.frame(maxWidth: .infinity, maxHeight: .infinity))
+        hosting.frame = panel.contentView!.bounds
+        hosting.autoresizingMask = [.width, .height]
+        panel.contentView = hosting
+        onCallPanel = panel
+    }
+
+    private func startOnCall() {
+        guard engineReady, let engine, !onCallActive, !onboardingActive, !inTry else { return }
+        onCallActive = true
+        onCallLog.entries = []               // fresh session log
+        onCallLog.paused = false
+        engine.holdToTalk = false            // hands-free: commit each utterance on silence
+
+        // OnCall does NOT auto-type (too disruptive). It only shows live recognition
+        // in the overlay + records every utterance to history (tagged oncall) for
+        // safety. The user copies via the overlay's Copy button.
+        engine.onPartial = { [weak self] text in
+            DispatchQueue.main.async {
+                guard let self, self.onCallActive else { return }
+                self.hudModel.partialText = text
+                self.hudModel.phase = .speaking
+            }
+        }
+        engine.onFinal = { [weak self] text in
+            DispatchQueue.main.async {
+                guard let self, self.onCallActive else { return }
+                self.history.append(text, mode: "oncall", ephemeral: !self.store.historyEnabled)
+                self.onCallLog.entries.append(HistoryItem(id: UUID(), text: text.trimmingCharacters(in: .whitespacesAndNewlines), date: Date(), mode: "oncall"))
+                self.hudModel.partialText = text
+                self.hudModel.phase = .pause
+            }
+        }
+
+        hudModel.reset()
+        hudModel.phase = .empty
+        sessionStart = Date()                // drive the overlay's running timer
+        startElapsedTimer()
+        if onCallPanel == nil { setupOnCallPanel() }
+        if let p = onCallPanel, let screen = NSScreen.main {
+            let vis = screen.visibleFrame
+            let psize = p.frame.size
+            p.setFrameOrigin(NSPoint(x: vis.maxX - psize.width - 20,
+                                     y: vis.maxY - psize.height - 12))
+            p.orderFrontRegardless()
+        }
+        setStatusIcon("📞")
+
+        engine.startSession()
+        do { try mic.start() }
+        catch {
+            hudModel.fail(icon: "🎙", title: L10n.shared.t("hud.micFail"),
+                          reason: "\(error.localizedDescription)")
+        }
+    }
+
+    private func stopOnCall() {
+        guard onCallActive else { return }
+        onCallActive = false
+        stopElapsedTimer()
+        mic.stop()
+        engine?.endSession()
+        engine?.holdToTalk = true            // restore push-to-talk default
+        onCallPanel?.orderOut(nil)
+        hudModel.reset()
+        setStatusIcon(engineReady ? "🎙" : "⏳")
+    }
+
+    /// All OnCall-tagged history, oldest-first, "[timestamp] text" per line — what
+    /// the overlay's Copy button puts on the clipboard (the whole standby log, not
+    /// just the current sentence).
+    private func onCallClipboardText() -> String {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        return onCallLog.entries
+            .map { "[\(f.string(from: $0.date))] \($0.text)" }
+            .joined(separator: "\n")
+    }
+
+    /// Pause / resume listening without ending the session.
+    private func toggleOnCallPause() {
+        guard onCallActive else { return }
+        if onCallLog.paused {
+            try? mic.start()
+            onCallLog.paused = false
+            setStatusIcon("📞")
+        } else {
+            mic.stop()
+            onCallLog.paused = true
+            setStatusIcon("⏸")
+        }
+    }
+
+    private func dictationModeName(_ m: String) -> String {
+        switch m {
+        case "type":   return "逐字插入"
+        case "oncall": return "持续候机"
+        default:        return "说完插入"
+        }
+    }
+
+
+    /// Stop OnCall with a confirmation; on confirm, restore the previous mode and
+    /// tell the user which mode is active + the hotkey to trigger it.
+    private func confirmStopOnCall() {
+        let prevName = dictationModeName(modeBeforeOnCall)
+        let hotkey = VibeKeycodes.name(hotkeyKeyCode)
+        let alert = NSAlert()
+        alert.messageText = "停止候机模式?"
+        var info = "停止后听写模式将切回「\(prevName)」,按 \(hotkey) 即可触发听写。"
+        if !store.historyEnabled && !onCallLog.entries.isEmpty {
+            info += "\n\n你未开启「保存历史」,本次 \(onCallLog.entries.count) 条记录不会永久保存。停止后会自动弹出记录窗,可在那里复制或导出。"
+        }
+        alert.informativeText = info
+        alert.addButton(withTitle: "停止")
+        alert.addButton(withTitle: "取消")
+        NSApp.activate(ignoringOtherApps: true)
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        store.insertMethod = modeBeforeOnCall   // restore the previous mode
+        // Nudge an open Settings window to re-read the (now reverted) mode.
+        NotificationCenter.default.post(name: Notification.Name("vibeSettingsExternallyChanged"), object: nil)
+        stopOnCall()
+        openOnCallSession()                     // auto-show this session's transcript
+    }
+
+    /// Pop the session viewer: the current session's entries (live), each selectable
+    /// for copy, plus export. Re-uses the window if it's already open.
+    private func openOnCallSession() {
+        if let w = onCallSessionWindow {        // already created — just resurface it
+            w.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+        let hosting = NSHostingController(rootView: OnCallSessionView(log: onCallLog))
+        let w = NSWindow(contentViewController: hosting)
+        w.title = "OnCall"
+        w.styleMask = [.titled, .closable, .resizable]
+        w.setContentSize(NSSize(width: 460, height: 420))
+        w.isReleasedWhenClosed = false
+        w.center()
+        onCallSessionWindow = w
+        w.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    // ============================================================
+    // Onboarding "try it" — in-window dictation (page 1)
+    // ============================================================
+
+    private var tryFinalizedPrefix = ""
+
+    func startTrySession() {
+        // Fire the contextual mic prompt on first ever press.
+        AVCaptureDevice.requestAccess(for: .audio) { _ in }
+        guard engineReady, let engine, !inTry else { return }
+
+        inTry = true
+        tryFinalizedPrefix = ""
+
+        engine.onPartial = { [weak self] text in
+            DispatchQueue.main.async {
+                guard let self, self.inTry else { return }
+                self.tryHUD.partialText = self.tryFinalizedPrefix + text
+                self.tryHUD.phase = .speaking
+            }
+        }
+        engine.onFinal = { [weak self] text in
+            DispatchQueue.main.async {
+                guard let self, self.inTry else { return }
+                self.tryFinalizedPrefix += text
+                self.tryHUD.partialText = self.tryFinalizedPrefix
+            }
+        }
+
+        tryHUD.reset()
+        tryHUD.phase = .empty
+
+        engine.startSession()
+        do {
+            try mic.start()
+        } catch {
+            inTry = false
+            tryHUD.fail(icon: "🎙", title: L10n.shared.t("hud.micFail"),
+                        reason: error.localizedDescription)
+        }
+    }
+
+    func stopTrySession() {
+        guard inTry else { return }
+        mic.stop()
+
+        if let engine {
+            engine.onPartial = nil
+            engine.onFinal = { [weak self] text in self?.tryFinalizedPrefix += text }
+            engine.endSession()
+            engine.onFinal = nil
+        }
+        let text = tryFinalizedPrefix
+        tryHUD.partialText = text
+        tryHUD.phase = text.isEmpty ? .idle : .done
+        tryHUD.level = 0
+        inTry = false
+    }
+
+    // MARK: elapsed clock
+
+    private func startElapsedTimer() {
+        stopElapsedTimer()
+        let timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, let start = self.sessionStart else { return }
+                let secs = Int(Date().timeIntervalSince(start))
+                self.hudModel.elapsed = HUDModel.formatElapsed(secs)
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        elapsedTimer = timer
+    }
+
+    private func stopElapsedTimer() {
+        elapsedTimer?.invalidate()
+        elapsedTimer = nil
+    }
+
+    // MARK: window lifecycle
+
+    func windowWillClose(_ notification: Notification) {
+        guard let w = notification.object as? NSWindow else { return }
+        if w === onboardingWindow {
+            onboardingWindow = nil
+            onboardingWindowDidDisappear()
+        }
+        if w === settingsWindow { settingsWindow = nil }
+        if w === padWindow { padWindow = nil }
+        if w === historyWindow { historyWindow = nil }
+    }
+
+    // MARK: launch at login
+
+    /// Reconcile the macOS login item with the stored preference (macOS 13+
+    /// SMAppService). Best-effort: failures are logged, not fatal.
+    private func applyLaunchAtLogin() {
+        LaunchAtLogin.setEnabled(store.launchAtLogin)
+    }
+
+    // MARK: helpers
+
+    nonisolated static func rmsLevel(_ samples: [Float]) -> Double {
+        guard !samples.isEmpty else { return 0 }
+        var sum: Double = 0
+        for s in samples { sum += Double(s) * Double(s) }
+        let rms = (sum / Double(samples.count)).squareRoot()
+        return min(1.0, max(0.0, rms * 6.0))
+    }
+}
+
+// ============================================================
+// VibeUI bridges — connect the SwiftUI surfaces to SettingsStore + Permissions.
+// ============================================================
+
+extension AppDelegate: SettingsBridge {
+    var showDockIcon: Bool {
+        get { store.showDockIcon }
+        set { store.showDockIcon = newValue }
+    }
+    var hotkeyKeyCode: Int { store.hotkeyKeyCode }
+    var hotkeyModifierOnly: Bool { store.hotkeyModifierOnly }
+    func setHotkey(keyCode: Int, modifierOnly: Bool) {
+        store.setHotkey(keyCode: keyCode, modifierOnly: modifierOnly)
+    }
+
+    // Engine config
+    var vadKind: String {
+        get { store.vadKind }
+        set { store.vadKind = newValue }   // posts engineConfigChanged → rebuild
+    }
+    var latencyTier: Int {
+        get { store.latencyTier }
+        set { store.latencyTier = newValue }
+    }
+
+    // Dictation behaviour
+    var insertMethod: String {
+        get { store.insertMethod }
+        set {
+            if newValue == "oncall" && store.insertMethod != "oncall" {
+                modeBeforeOnCall = store.insertMethod   // remember to restore on stop
+            }
+            store.insertMethod = newValue
+            applyDictationMode()
+        }
+    }
+    var clipboardOverwrite: Bool {
+        get { store.clipboardOverwrite }
+        set { store.clipboardOverwrite = newValue }
+    }
+    var padWriteEnabled: Bool {
+        get { store.padWriteEnabled }
+        set { store.padWriteEnabled = newValue }
+    }
+    var historyEnabled: Bool {
+        get { store.historyEnabled }
+        set { store.historyEnabled = newValue }
+    }
+    var launchAtLogin: Bool {
+        get { store.launchAtLogin }
+        set { store.launchAtLogin = newValue }
+    }
+
+    var modelManager: ModelManagerBridge? { downloader }
+
+    /// Apply a tier selection. If it's already available, the store change posts
+    /// engineConfigChanged → rebuild. Otherwise we start the download; the engine
+    /// stays on the bundled tier until the download completes, then auto-swaps.
+    func selectTier(_ tier: Int) {
+        guard let t = LatencyTier(rawValue: tier) else { return }
+        store.latencyTier = tier   // persists + posts engineConfigChanged
+        if !ModelPaths.tierAvailable(t) {
+            downloader.startDownload(t)
+            // Observe completion to swap once present.
+            observeDownloadCompletion(for: t)
+        }
+    }
+
+    /// Poll the downloader until the selected tier becomes available, then
+    /// rebuild the engine onto it (if it's still the selected tier). Stops on
+    /// completion, failure, or if the user picks a different tier.
+    private func observeDownloadCompletion(for tier: LatencyTier) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+            guard let self else { return }
+            if self.store.latencyTier != tier.rawValue { return }   // user moved on
+            if ModelPaths.tierAvailable(tier) {
+                self.rebuildEngineForConfig()                       // swap onto it
+            } else if self.downloader.downloadProgress(tier) != nil {
+                self.observeDownloadCompletion(for: tier)           // still downloading
+            }
+            // else: failed / cancelled → stop polling (UI shows the failed state).
+        }
+    }
+
+    // Live permission reads. (accessibilityGranted()/inputMonitoringGranted()
+    // are declared in the OnboardingBridge extension below — identical signatures,
+    // so a single implementation satisfies BOTH protocols.)
+    func micGranted() -> Bool { Permissions.micState() == .granted }
+    func openPermissionSettings(_ which: PermissionKind) {
+        switch which {
+        case .microphone:      Permissions.openMicrophoneSettings()
+        case .accessibility:   Permissions.requestAccessibility()
+        case .inputMonitoring: Permissions.requestInputMonitoring()
+        }
+    }
+
+    /// SettingsBridge: the About tab's "检查更新" button → Sparkle's user-initiated check.
+    func checkForUpdates() {
+        // Bring the app forward so Sparkle's progress/alert windows are visible
+        // (we're an accessory/menu-bar app most of the time).
+        NSApp.activate(ignoringOtherApps: true)
+        updaterController.checkForUpdates(nil)
+    }
+}
+
+extension AppDelegate: OnboardingBridge {
+    func microphoneState() -> OnboardingPermission {
+        switch Permissions.micState() {
+        case .granted:       return .granted
+        case .notDetermined: return .notDetermined
+        case .denied:        return .denied
+        }
+    }
+    func accessibilityGranted() -> Bool { Permissions.accessibilityGranted() }
+    func inputMonitoringGranted() -> Bool { Permissions.inputMonitoringGranted() }
+
+    func requestMicrophone() { Permissions.requestMic() }
+    func openMicrophoneSettings() { Permissions.openMicrophoneSettings() }
+    func requestAccessibility() { Permissions.requestAccessibility() }
+    func requestInputMonitoring() { Permissions.requestInputMonitoring() }
+
+    var tryModel: HUDModel { tryHUD }
+
+    func onboardingWindowDidAppear() {
+        onboardingActive = true
+    }
+
+    func onboardingWindowDidDisappear() {
+        if inTry { stopTrySession() }
+        onboardingActive = false
+    }
+
+    func finishOnboarding() {
+        store.didCompleteOnboarding = true
+        closeOnboarding()
+    }
+}
