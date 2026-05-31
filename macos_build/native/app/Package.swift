@@ -9,9 +9,16 @@
 // Toolchain: Xcode 26.5 / Swift 6.3 / arm64. Links sherpa's OWN onnxruntime
 // 1.24.4 for BOTH sherpa and the firered shim (single ORT — see gotcha A).
 import PackageDescription
+import Foundation
 
-// Absolute roots (this package lives at <B>/native/app).
-let B   = "/path/to/xasr_workspace/xasr_macos_build"
+// B = the macos_build/ root, derived from this manifest's location (no hardcoded
+// absolute path → portable). This file lives at <B>/native/app/Package.swift, so
+// strip three path components.
+let B = URL(fileURLWithPath: #filePath)
+    .deletingLastPathComponent()   // .../native/app
+    .deletingLastPathComponent()   // .../native
+    .deletingLastPathComponent()   // .../<B> (macos_build)
+    .path
 let KNF = "\(B)/native/third_party/kaldi-native-fbank"      // include root for "kaldi-native-fbank/csrc/*.h"
 let KISS = "\(B)/native/third_party/kissfft"                // kiss_fft.h / kiss_fftr.h
 let ORT_INC = "\(B)/native/third_party/onnxruntime/include" // 1.22 headers OK to compile against

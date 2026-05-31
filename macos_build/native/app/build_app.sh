@@ -25,14 +25,18 @@
 
 set -euo pipefail
 
-B="/path/to/xasr_workspace/xasr_macos_build"
+# B = the macos_build/ root, derived from this script's location (no hardcoded
+# absolute path → the repo is portable). build_app.sh lives at native/app/.
+B="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 APP_SRC="$B/native/app"
 DIST="$B/native/dist"
 APP="$DIST/Vibe XASR.app"
 
 SHERPA_LIB="$B/native/sherpa/dist/sherpa-onnx-v1.13.2-osx-universal2-shared/lib"
 ARCHS="--arch arm64 --arch x86_64"               # universal2 (Apple Silicon + Intel)
-ASR_SRC="$B/../vad_asr_demo/models/asr"          # encoder/decoder/joiner-960ms + tokens
+# 960ms ASR model lives OUTSIDE the repo (xasr_workspace/vad_asr_demo). Override
+# ASR_SRC to point elsewhere, or fetch from HuggingFace GilgameshWind/X-ASR-zh-en.
+ASR_SRC="${ASR_SRC:-$B/../../vad_asr_demo/models/asr}"   # encoder/decoder/joiner-960ms + tokens
 FIRED_SRC="$B/models/firered"
 UI_SRC="$B/ui"
 ENTITLEMENTS="$APP_SRC/Resources/VibeIME.entitlements"

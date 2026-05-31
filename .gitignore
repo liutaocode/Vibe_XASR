@@ -4,15 +4,23 @@
 # SwiftPM build output
 .build/
 
-# Release artifacts — rebuild via native/app/build_app.sh / package_release.sh
-# (built .app and notarized .dmg do not belong in git; ship via GitHub Releases)
-native/dist/
+# .NET build output (windows_build)
+windows_build/**/bin/
+windows_build/**/obj/
+
+# Release artifacts — rebuild via the per-platform build scripts.
+# (built .app / notarized .dmg / Windows exe don't belong in git; ship via Releases)
+macos_build/native/dist/
+windows_build/dist/
 
 # Debug symbols
 *.dSYM/
 
-# Re-downloadable archive (the extracted lib under native/sherpa/dist/ is kept)
+# Re-downloadable sherpa archive (the extracted lib under native/sherpa/dist/ is kept)
 *.tar.bz2
+
+# ASR models downloaded on Windows (fetched from HuggingFace, not committed)
+windows_build/**/models/
 
 # Logs / scratch
 *.log

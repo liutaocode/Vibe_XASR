@@ -14,7 +14,7 @@ enum ModelPaths {
     private static let srcAsr =
         "/path/to/xasr_workspace/vad_asr_demo/models/asr"
     private static let srcFired =
-        "/path/to/xasr_workspace/xasr_macos_build/models/firered"
+        "/path/to/xasr_workspace/xasr_macos_build/macos_build/models/firered"
     private static let srcSilero =
         "/path/to/xasr_workspace/vad_asr_demo/models/silero_vad.onnx"
 
