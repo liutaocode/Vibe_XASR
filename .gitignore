@@ -1,0 +1,19 @@
+# macOS
+.DS_Store
+
+# SwiftPM build output
+.build/
+
+# Release artifacts — rebuild via native/app/build_app.sh / package_release.sh
+# (built .app and notarized .dmg do not belong in git; ship via GitHub Releases)
+native/dist/
+
+# Debug symbols
+*.dSYM/
+
+# Re-downloadable archive (the extracted lib under native/sherpa/dist/ is kept)
+*.tar.bz2
+
+# Logs / scratch
+*.log
+/tmp/

@@ -1,0 +1,12 @@
+# X-ASR macOS build (Apple Silicon / Python 3.10)
+sherpa-onnx>=1.13.2
+numpy
+sounddevice
+soundfile
+rumps                       # menu-bar status item
+pynput                      # global push-to-talk hotkey
+pywebview                   # native windows hosting the design pages
+pyobjc-framework-Cocoa
+pyobjc-framework-Quartz
+fireredvad                  # FireRedVAD (pulls torch); falls back to silero if absent
+py2app                      # packaging

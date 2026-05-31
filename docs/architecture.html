@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Vibe XASR · 架构图</title>
+<style>
+  :root{
+    --bg:#0E0E12; --panel:#16161d; --panel2:#1d1d26; --line:#2a2a36;
+    --text:#e9e9f0; --muted:#9a9aab; --a:#7c5cff; --b:#22d3ee; --ok:#34d399; --warn:#fbbf24;
+    --mono:"SF Mono",ui-monospace,Menlo,monospace;
+    --ui:-apple-system,"PingFang SC",system-ui,sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--ui);padding:32px 24px 56px}
+  .wrap{max-width:1080px;margin:0 auto}
+  h1{font-size:22px;margin:0 0 2px;display:flex;align-items:center;gap:10px}
+  .logo{width:26px;height:26px;border-radius:7px;background:linear-gradient(160deg,var(--a),var(--b));display:inline-block}
+  .sub{color:var(--muted);font-size:13px;margin:0 0 24px}
+  .layer{border:1px solid var(--line);border-radius:14px;background:var(--panel);padding:14px 16px;margin:0 0 12px}
+  .layer h2{font-size:13px;margin:0 0 11px;color:var(--b);letter-spacing:.04em;text-transform:uppercase;font-weight:700}
+  .layer h2 .zh{color:var(--text);text-transform:none;font-size:14px;margin-right:8px;letter-spacing:0}
+  .row{display:flex;flex-wrap:wrap;gap:10px}
+  .box{flex:1 1 160px;min-width:150px;background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+  .box .t{font-size:13.5px;font-weight:600;margin-bottom:3px}
+  .box .d{font-size:11.5px;color:var(--muted);line-height:1.5;font-family:var(--mono)}
+  .box.core{border-color:var(--a);box-shadow:0 0 0 1px rgba(124,92,255,.25) inset}
+  .box.model{border-color:rgba(34,211,238,.4)}
+  .arrow{text-align:center;color:var(--a);font-size:18px;line-height:1;margin:1px 0 9px}
+  .flow{border:1px dashed var(--line);border-radius:12px;padding:13px 16px;margin:20px 0;background:rgba(124,92,255,.05);font-family:var(--mono);font-size:12px;color:var(--text);line-height:2.1;overflow-x:auto;white-space:nowrap}
+  .flow b{color:var(--b)} .flow .a{color:var(--a)} .flow .g{color:var(--ok)} .flow span.m{color:var(--muted)}
+  .tag{display:inline-block;font-family:var(--mono);font-size:10px;color:var(--muted);border:1px solid var(--line);border-radius:5px;padding:1px 6px;margin-left:6px;vertical-align:middle}
+  .pill{font-family:var(--mono);font-size:10.5px;padding:2px 7px;border-radius:20px;background:rgba(52,211,153,.13);color:var(--ok);border:1px solid rgba(52,211,153,.3)}
+  .legend{color:var(--muted);font-size:12px;margin-top:18px;line-height:1.8}
+  .legend code{color:var(--b);font-family:var(--mono)}
+  footer{color:var(--muted);font-size:11px;margin-top:26px;text-align:center;font-family:var(--mono)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1><span class="logo"></span>Vibe XASR <span class="tag">v1.0.0 · macOS · Apple Silicon · 100% 本地</span></h1>
+  <p class="sub">本地语音输入法 · 流式中英识别 · Developer ID 签名 + 公证 · 全程离线,数据不上云</p>
+
+  <!-- L1 UI -->
+  <div class="layer">
+    <h2><span class="zh">① 交互层</span> UI / AppKit + SwiftUI <span class="pill">VibeUI</span></h2>
+    <div class="row">
+      <div class="box"><div class="t">菜单栏 NSStatusItem</div><div class="d">状态图标 + 菜单:设置/便笺/历史/向导/退出</div></div>
+      <div class="box"><div class="t">HUD 悬浮窗</div><div class="d">NSPanel 底部居中 · 按住听写的实时反馈</div></div>
+      <div class="box"><div class="t">OnCall 悬浮窗</div><div class="d">右上角可交互 · 复制/查看/暂停/停止</div></div>
+      <div class="box"><div class="t">窗口</div><div class="d">设置(6标签)/向导/历史/便笺/会话查看</div></div>
+      <div class="box"><div class="t">国际化 L10n</div><div class="d">中 / 英 / 日 / 韩 · 默认跟随系统</div></div>
+    </div>
+  </div>
+  <div class="arrow">▲ 状态/文本 &nbsp;&nbsp;|&nbsp;&nbsp; 触发/配置 ▼</div>
+
+  <!-- L2 input -->
+  <div class="layer">
+    <h2><span class="zh">② 输入捕获</span> Input</h2>
+    <div class="row">
+      <div class="box"><div class="t">全局热键 CGEventTap</div><div class="d">按住说话(默认 Right ⌘)· 可自定义</div></div>
+      <div class="box"><div class="t">麦克风 AVAudioEngine</div><div class="d">采集 → 重采样 16kHz 单声道 float</div></div>
+    </div>
+  </div>
+  <div class="arrow">▼ 16kHz PCM</div>
+
+  <!-- L3 engine -->
+  <div class="layer">
+    <h2><span class="zh">③ 听写引擎(核心)</span> DictationEngine</h2>
+    <div class="row">
+      <div class="box core"><div class="t">分帧 + 预录缓冲</div><div class="d">512样本/32ms 窗 · preroll 找回句首</div></div>
+      <div class="box core"><div class="t">VAD 端点检测</div><div class="d">FireRedVAD(DFSMN, ONNX)/ silero · 判语音段</div></div>
+      <div class="box core"><div class="t">特征</div><div class="d">kaldi-native-fbank 80-mel + CMVN</div></div>
+      <div class="box core"><div class="t">ASR 流式识别</div><div class="d">sherpa-onnx zipformer2 transducer<br>encoder/decoder/joiner · 贪心解码</div></div>
+      <div class="box core"><div class="t">后处理</div><div class="d">CJK 去空格归一化 · partial/final</div></div>
+    </div>
+    <div style="margin-top:10px;font-size:11.5px;color:var(--muted);font-family:var(--mono)">
+      模式:&nbsp; 说完插入(按住=一条流) &nbsp;·&nbsp; 逐字插入(流式直插) &nbsp;·&nbsp; OnCall(常驻后台,VAD 自动分句)
+    </div>
+  </div>
+  <div class="arrow">▼ 识别文本(partial / final)</div>
+
+  <!-- L4 output -->
+  <div class="layer">
+    <h2><span class="zh">④ 输出 / 插入</span> Output</h2>
+    <div class="row">
+      <div class="box"><div class="t">StreamingInserter</div><div class="d">逐字符 Unicode 键事件(清空修饰键)→ 光标处</div></div>
+      <div class="box"><div class="t">Paste</div><div class="d">剪贴板 + ⌘V(说完一次性插入)</div></div>
+      <div class="box"><div class="t">OnCall 显示</div><div class="d">悬浮窗展示 + 手动复制(不自动插入)</div></div>
+    </div>
+  </div>
+  <div class="arrow">▼ 落地 / 持久化</div>
+
+  <!-- L5 data -->
+  <div class="layer">
+    <h2><span class="zh">⑤ 本地数据</span> Storage <span class="pill">~/Library/Application Support/VibeXASR</span></h2>
+    <div class="row">
+      <div class="box"><div class="t">HistoryStore</div><div class="d">history.json · 永久 / 关历史时 60s 临时<br>累计字数 + 节省时间统计</div></div>
+      <div class="box"><div class="t">PadStore</div><div class="d">内置便笺</div></div>
+      <div class="box"><div class="t">SettingsStore</div><div class="d">UserDefaults:模式/档位/VAD/热键/语言…</div></div>
+      <div class="box"><div class="t">ModelDownloader</div><div class="d">按需下载档位模型(URLSession + 进度)</div></div>
+    </div>
+  </div>
+
+  <!-- L6 models -->
+  <div class="layer">
+    <h2><span class="zh">⑥ 模型</span> Models / Runtime</h2>
+    <div class="row">
+      <div class="box model"><div class="t">X-ASR zh-en</div><div class="d">zipformer2 流式 · fp32 · 内置 960ms<br>160/480/1920ms 从 HuggingFace 按需下载</div></div>
+      <div class="box model"><div class="t">FireRedVAD / silero</div><div class="d">ONNX · 随包内置</div></div>
+      <div class="box model"><div class="t">ONNX Runtime</div><div class="d">CPU 执行器 · 2 线程(非 ANE / 非量化)</div></div>
+      <div class="box model"><div class="t">来源</div><div class="d">huggingface.co/GilgameshWind/X-ASR-zh-en</div></div>
+    </div>
+  </div>
+
+  <!-- flow -->
+  <div class="flow">
+    🎙 麦克风 <span class="a">→</span> AVAudioEngine <span class="m">(16k float)</span> <span class="a">→</span> 分帧+preroll <span class="a">→</span> <b>VAD</b><span class="m">(fbank+CMVN)</span> <span class="a">→</span> 语音段 <span class="a">→</span> <b>zipformer ASR</b> <span class="a">→</span> 文本 <span class="a">→</span> CJK归一化 <span class="a">→</span> <span class="g">插入光标</span> + <span class="g">存历史</span> + HUD显示
+  </div>
+
+  <!-- packaging -->
+  <div class="layer">
+    <h2><span class="zh">⑦ 打包 / 发布</span> Build &amp; Release</h2>
+    <div class="row">
+      <div class="box"><div class="t">SwiftPM 构建</div><div class="d">build_app.sh → Vibe XASR.app</div></div>
+      <div class="box"><div class="t">签名</div><div class="d">Developer ID · 硬化运行时 · entitlements(麦克风)</div></div>
+      <div class="box"><div class="t">公证 + staple</div><div class="d">notarytool → Apple → 装订到 app/dmg</div></div>
+      <div class="box"><div class="t">分发</div><div class="d">VibeXASR-1.0.0.dmg · Gatekeeper 通过</div></div>
+    </div>
+  </div>
+
+  <p class="legend">
+    要点:<br>
+    · <code>全程本地</code>:音频与文本只在本机处理与存储,任何环节不联网(模型下载除外)。<br>
+    · <code>实时</code>:流式分块推理,单块计算小,Apple Silicon CPU 实时因子 ≪ 1,无需 GPU/ANE。<br>
+    · <code>三种模式</code>共用同一引擎,仅"何时分句 + 如何落地文本"不同。<br>
+    · <code>权限</code>:麦克风(采集)、辅助功能(把文本/键事件送进其它 app)、输入监听(全局热键)。
+  </p>
+
+  <footer>Vibe XASR · 架构总览 · 本图与代码同源(VibeIME app 目标 + VibeUI 库)</footer>
+</div>
+</body>
+</html>

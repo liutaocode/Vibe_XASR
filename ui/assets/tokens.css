@@ -1,0 +1,134 @@
+/* ============================================================
+   Vibe IME — Design Tokens
+   深色优先,浅色为镜像。accent 渐变贯穿声波/CTA/聆听态/Logo。
+   ============================================================ */
+
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,500;0,700;1,400&display=swap');
+
+:root {
+  /* ---- color (dark, default) ---- */
+  --bg: #0E0E12;
+  --surface: #1A1A22;
+  --surface-2: #24242E;
+  --text: #ECECF1;
+  --text-muted: #8A8A99;
+  --hairline: rgba(255, 255, 255, 0.08);
+  --hairline-strong: rgba(255, 255, 255, 0.14);
+  --inner-stroke: rgba(255, 255, 255, 0.06);
+
+  --accent-a: #7C5CFF;
+  --accent-b: #38E1D6;
+  --accent: linear-gradient(100deg, #7C5CFF 0%, #38E1D6 100%);
+  --accent-soft: rgba(124, 92, 255, 0.16);
+
+  --success: #45D483;
+  --warn: #FFB020;
+  --error: #FF5C66;
+
+  /* glass / vibrancy */
+  --glass: rgba(26, 26, 34, 0.66);
+  --glass-blur: 30px;
+
+  /* shadows */
+  --shadow-float: 0 12px 40px rgba(0, 0, 0, 0.45);
+  --shadow-card: 0 6px 24px rgba(0, 0, 0, 0.3);
+  --shadow-glow: 0 0 0 0 rgba(124, 92, 255, 0.0);
+
+  /* radius */
+  --r-panel: 16px;
+  --r-card: 12px;
+  --r-control: 8px;
+  --r-pill: 999px;
+
+  /* spacing scale */
+  --s1: 4px;  --s2: 8px;  --s3: 12px;  --s4: 16px;  --s6: 24px;  --s8: 32px;
+
+  /* type */
+  --font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display",
+    "Helvetica Neue", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", "SF Mono", ui-monospace, "Menlo", monospace;
+
+  /* motion */
+  --dur-fast: 120ms;
+  --dur: 150ms;
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+[data-theme="light"] {
+  --bg: #F6F6F8;
+  --surface: #FFFFFF;
+  --surface-2: #EFEFF3;
+  --text: #1A1A22;
+  --text-muted: #71717F;
+  --hairline: rgba(0, 0, 0, 0.08);
+  --hairline-strong: rgba(0, 0, 0, 0.12);
+  --inner-stroke: rgba(0, 0, 0, 0.05);
+  --glass: rgba(255, 255, 255, 0.7);
+  --shadow-float: 0 12px 40px rgba(20, 20, 40, 0.18);
+  --shadow-card: 0 6px 24px rgba(20, 20, 40, 0.1);
+  --accent-soft: rgba(124, 92, 255, 0.12);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: var(--font-ui);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+::selection { background: rgba(124, 92, 255, 0.32); }
+
+.mono { font-family: var(--font-mono); }
+
+/* gradient text helper */
+.grad-text {
+  background: var(--accent);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* focus ring (accessibility) */
+:focus-visible {
+  outline: 2px solid var(--accent-a);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
+}
+
+/* ---- shared little nav pill used across pages ---- */
+.page-nav {
+  position: fixed; top: 16px; left: 16px; z-index: 9999;
+  display: flex; gap: 4px; align-items: center;
+  padding: 5px; border-radius: var(--r-pill);
+  background: var(--glass);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.4);
+  backdrop-filter: blur(var(--glass-blur)) saturate(1.4);
+  border: 1px solid var(--inner-stroke);
+  box-shadow: var(--shadow-float);
+  font-size: 12.5px;
+}
+.page-nav a, .page-nav button {
+  font: inherit; font-family: var(--font-ui);
+  color: var(--text-muted); text-decoration: none;
+  padding: 6px 12px; border-radius: var(--r-pill);
+  border: none; background: transparent; cursor: pointer;
+  white-space: nowrap; transition: color var(--dur), background var(--dur);
+}
+.page-nav a:hover, .page-nav button:hover { color: var(--text); background: var(--hairline); }
+.page-nav a.active { color: var(--text); background: var(--surface-2); }
+.page-nav .brand {
+  display: flex; align-items: center; gap: 7px;
+  padding: 6px 8px 6px 10px; color: var(--text); font-weight: 600;
+}
+.page-nav .brand .dot {
+  width: 14px; height: 14px; border-radius: 5px; background: var(--accent);
+  box-shadow: 0 0 10px rgba(124,92,255,0.6);
+}

@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Vibe IME — 设计概览</title>
+<link rel="stylesheet" href="assets/tokens.css">
+<style>
+  html, body { height: 100%; }
+  body {
+    background:
+      radial-gradient(1200px 700px at 80% -10%, rgba(124,92,255,0.18), transparent 60%),
+      radial-gradient(1000px 600px at 0% 110%, rgba(56,225,214,0.12), transparent 55%),
+      var(--bg);
+    min-height: 100%;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 96px 32px 80px; }
+
+  /* hero */
+  .logo-row { display: flex; align-items: center; gap: 16px; margin-bottom: 28px; }
+  .logo {
+    width: 64px; height: 64px; border-radius: 16px; flex: none;
+    background: var(--accent);
+    box-shadow: 0 10px 30px rgba(124,92,255,0.45), inset 0 1px 0 rgba(255,255,255,0.25);
+    display: grid; place-items: center; position: relative; overflow: hidden;
+  }
+  .logo .bars { display: flex; align-items: center; gap: 3px; height: 30px; }
+  .logo .bars i {
+    width: 4px; border-radius: 2px; background: rgba(255,255,255,0.95);
+    animation: logobar 1.1s var(--ease-out) infinite alternate;
+  }
+  .logo .bars i:nth-child(1){height:10px; animation-delay:0s}
+  .logo .bars i:nth-child(2){height:22px; animation-delay:.12s}
+  .logo .bars i:nth-child(3){height:30px; animation-delay:.24s}
+  .logo .bars i:nth-child(4){height:18px; animation-delay:.36s}
+  .logo .bars i:nth-child(5){height:12px; animation-delay:.48s}
+  @keyframes logobar { from{ transform: scaleY(0.45) } to{ transform: scaleY(1) } }
+
+  .eyebrow { font-family: var(--font-mono); font-size: 12.5px; letter-spacing: .12em;
+    text-transform: uppercase; color: var(--accent-b); margin: 0 0 6px; }
+  h1 { font-size: 30px; font-weight: 700; margin: 0; letter-spacing: -0.01em; }
+  .slogan { font-size: 40px; font-weight: 700; letter-spacing: -0.02em; margin: 26px 0 10px;
+    line-height: 1.12; max-width: 16ch; }
+  .sub { color: var(--text-muted); font-size: 16px; max-width: 56ch; line-height: 1.6; margin: 0; }
+  .sub code { font-family: var(--font-mono); color: var(--text);
+    background: var(--surface-2); padding: 1px 6px; border-radius: 5px; font-size: 14px; }
+
+  /* trust strip */
+  .trust { display: flex; flex-wrap: wrap; gap: 10px; margin: 28px 0 0; }
+  .chip { display: inline-flex; align-items: center; gap: 7px; font-size: 13px;
+    color: var(--text-muted); background: var(--surface); border: 1px solid var(--hairline);
+    padding: 7px 13px; border-radius: var(--r-pill); }
+  .chip .d { width: 7px; height: 7px; border-radius: 50%; background: var(--success); }
+
+  /* cards */
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 56px; }
+  .card { display: flex; flex-direction: column; text-decoration: none; color: inherit;
+    background: var(--surface); border: 1px solid var(--hairline); border-radius: var(--r-panel);
+    padding: 22px; min-height: 240px; transition: transform var(--dur) var(--ease-out),
+    border-color var(--dur), box-shadow var(--dur); position: relative; overflow: hidden; }
+  .card:hover { transform: translateY(-4px); border-color: var(--hairline-strong); box-shadow: var(--shadow-card); }
+  .card .num { font-family: var(--font-mono); font-size: 12px; color: var(--text-muted); }
+  .card h3 { font-size: 18px; margin: 14px 0 6px; font-weight: 650; }
+  .card p { font-size: 13.5px; color: var(--text-muted); line-height: 1.55; margin: 0; }
+  .card .go { margin-top: auto; padding-top: 18px; font-family: var(--font-mono); font-size: 12.5px;
+    color: var(--accent-b); display: flex; align-items: center; gap: 6px; }
+  .card .go .arr { transition: transform var(--dur) var(--ease-out); }
+  .card:hover .go .arr { transform: translateX(4px); }
+
+  .preview { height: 92px; border-radius: var(--r-card); border: 1px solid var(--hairline);
+    background: var(--surface-2); margin-bottom: 4px; position: relative; overflow: hidden;
+    display: grid; place-items: center; }
+
+  /* mini HUD preview */
+  .mini-hud { display: flex; align-items: center; gap: 8px; padding: 8px 12px;
+    border-radius: var(--r-pill); background: var(--glass);
+    border: 1px solid var(--inner-stroke); box-shadow: var(--shadow-float);
+    -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); }
+  .mini-hud .orb { width: 22px; height: 22px; border-radius: 50%; background: var(--accent);
+    box-shadow: 0 0 12px rgba(124,92,255,0.7); flex: none; }
+  .mini-hud .t { font-family: var(--font-mono); font-size: 11px; color: var(--text); white-space: nowrap; }
+  .mini-hud .t::after { content:'▌'; color: var(--accent-b); animation: blink 1s step-end infinite; }
+  @keyframes blink { 50%{ opacity: 0 } }
+
+  /* mini settings preview */
+  .mini-rows { width: 78%; display: flex; flex-direction: column; gap: 7px; }
+  .mini-rows .r { display: flex; align-items: center; justify-content: space-between;
+    background: var(--surface); border: 1px solid var(--hairline); border-radius: 6px; padding: 5px 8px; }
+  .mini-rows .r span { width: 38%; height: 5px; border-radius: 3px; background: var(--text-muted); opacity: .5; }
+  .mini-rows .r .sw { width: 24px; height: 13px; border-radius: 999px; background: var(--accent); position: relative; }
+  .mini-rows .r .sw::after { content:''; position: absolute; right: 2px; top: 2px; width: 9px; height: 9px;
+    border-radius: 50%; background: #fff; }
+
+  /* mini menubar preview */
+  .mini-menu { width: 70%; background: var(--glass); border: 1px solid var(--inner-stroke);
+    border-radius: 10px; padding: 8px; box-shadow: var(--shadow-float);
+    -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); }
+  .mini-menu .h { display: flex; align-items: center; gap: 6px; font-size: 10px; color: var(--text); margin-bottom: 7px; }
+  .mini-menu .h .d { width: 7px; height: 7px; border-radius: 50%; background: var(--success); }
+  .mini-menu .l { height: 6px; border-radius: 3px; background: var(--surface-2); margin: 4px 0; }
+  .mini-menu .l.s { width: 60%; }
+
+  /* tokens */
+  .tokens { margin-top: 64px; }
+  .tokens h2 { font-size: 13px; font-family: var(--font-mono); text-transform: uppercase;
+    letter-spacing: .1em; color: var(--text-muted); margin: 0 0 18px; }
+  .swrow { display: flex; flex-wrap: wrap; gap: 10px; }
+  .sw-card { background: var(--surface); border: 1px solid var(--hairline); border-radius: 10px;
+    padding: 10px; width: 132px; }
+  .sw-card .box { height: 44px; border-radius: 7px; margin-bottom: 8px; border: 1px solid var(--inner-stroke); }
+  .sw-card .name { font-size: 12px; font-weight: 600; }
+  .sw-card .val { font-family: var(--font-mono); font-size: 10.5px; color: var(--text-muted); }
+
+  .foot { margin-top: 56px; color: var(--text-muted); font-size: 12.5px; font-family: var(--font-mono); }
+
+  /* theme toggle */
+  .ttog { position: fixed; top: 16px; right: 16px; z-index: 9999;
+    display: flex; gap: 4px; padding: 5px; border-radius: var(--r-pill);
+    background: var(--glass); border: 1px solid var(--inner-stroke); box-shadow: var(--shadow-float);
+    -webkit-backdrop-filter: blur(var(--glass-blur)); backdrop-filter: blur(var(--glass-blur)); }
+  .ttog button { font: inherit; font-family: var(--font-ui); font-size: 12px; cursor: pointer;
+    border: none; background: transparent; color: var(--text-muted); padding: 6px 13px; border-radius: var(--r-pill); }
+  .ttog button.on { background: var(--surface-2); color: var(--text); }
+
+  @media (max-width: 860px) {
+    .grid { grid-template-columns: 1fr; }
+    .slogan { font-size: 32px; }
+  }
+</style>
+</head>
+<body>
+  <div class="ttog">
+    <button data-set="dark" class="on">深色</button>
+    <button data-set="light">浅色</button>
+  </div>
+
+  <div class="wrap">
+    <div class="logo-row">
+      <div class="logo"><div class="bars"><i></i><i></i><i></i><i></i><i></i></div></div>
+      <div>
+        <p class="eyebrow">VIBE IME · 本地语音输入法</p>
+        <h1>为 vibe coding 而生</h1>
+      </div>
+    </div>
+
+    <div class="slogan grad-text">按住说话,<br>代码自己长出来</div>
+    <p class="sub">本地语音输入法。按住一个键说话,把 prompt / 代码 / commit message / 注释 直接「说」进任意输入框。<code>100% 本地</code> · 流式低延迟 · 中英混说。</p>
+
+    <div class="trust">
+      <span class="chip"><i class="d"></i>不联网 · 数据不出设备</span>
+      <span class="chip"><i class="d"></i>边说边出字 partial→final</span>
+      <span class="chip"><i class="d"></i>「把这个 function 改成 async」一句无缝识别</span>
+    </div>
+
+    <div class="grid">
+      <a class="card" href="hud.html">
+        <div class="preview">
+          <div class="mini-hud"><div class="orb"></div><div class="t">改成 async</div></div>
+        </div>
+        <div class="num">01 · 核心</div>
+        <h3>悬浮听写浮层</h3>
+        <p>产品的灵魂页。按住说话、波形随声起伏、partial→final 流式出字、松开落字。可交互原型 + 6 状态 + 3 形态。</p>
+        <div class="go">打开原型 <span class="arr">→</span></div>
+      </a>
+
+      <a class="card" href="settings.html">
+        <div class="preview">
+          <div class="mini-rows">
+            <div class="r"><span></span><div class="sw"></div></div>
+            <div class="r"><span></span><div class="sw"></div></div>
+            <div class="r"><span style="width:52%"></span><div class="sw"></div></div>
+          </div>
+        </div>
+        <div class="num">02 · 设置</div>
+        <h3>偏好窗口</h3>
+        <p>General / Dictation / Model / Permissions / About 五个 Tab,全控件态:toggle、按键录制、模型下载进度、权限检测。</p>
+        <div class="go">打开设置 <span class="arr">→</span></div>
+      </a>
+
+      <a class="card" href="menubar.html">
+        <div class="preview">
+          <div class="mini-menu">
+            <div class="h"><span class="d"></span>就绪 · FireRedVAD</div>
+            <div class="l"></div><div class="l s"></div><div class="l"></div>
+          </div>
+        </div>
+        <div class="num">03 · 常驻</div>
+        <h3>菜单栏下拉面板</h3>
+        <p>产品的「家」。状态行、最近一条识别、启用/暂停开关、设置入口。字形 3 态:idle / listening / working。</p>
+        <div class="go">打开面板 <span class="arr">→</span></div>
+      </a>
+    </div>
+
+    <div class="tokens">
+      <h2>Design Tokens — 颜色</h2>
+      <div class="swrow">
+        <div class="sw-card"><div class="box" style="background:#0E0E12"></div><div class="name">bg</div><div class="val">#0E0E12</div></div>
+        <div class="sw-card"><div class="box" style="background:#1A1A22"></div><div class="name">surface</div><div class="val">#1A1A22</div></div>
+        <div class="sw-card"><div class="box" style="background:#24242E"></div><div class="name">surface-2</div><div class="val">#24242E</div></div>
+        <div class="sw-card"><div class="box" style="background:linear-gradient(100deg,#7C5CFF,#38E1D6)"></div><div class="name">accent</div><div class="val">#7C5CFF→#38E1D6</div></div>
+        <div class="sw-card"><div class="box" style="background:#45D483"></div><div class="name">success</div><div class="val">#45D483</div></div>
+        <div class="sw-card"><div class="box" style="background:#FFB020"></div><div class="name">warn</div><div class="val">#FFB020</div></div>
+        <div class="sw-card"><div class="box" style="background:#FF5C66"></div><div class="name">error</div><div class="val">#FF5C66</div></div>
+      </div>
+    </div>
+
+    <p class="foot">// 圆角 panel 16 / card 12 / HUD 胶囊 · 间距 4·8·12·16·24·32 · UI: SF Pro / 识别文本: JetBrains Mono · 深浅双套</p>
+  </div>
+
+<script>
+  const root = document.documentElement;
+  const saved = localStorage.getItem('vibe-theme') || 'dark';
+  root.setAttribute('data-theme', saved);
+  document.querySelectorAll('.ttog button').forEach(b => {
+    b.classList.toggle('on', b.dataset.set === saved);
+    b.addEventListener('click', () => {
+      const t = b.dataset.set;
+      root.setAttribute('data-theme', t);
+      localStorage.setItem('vibe-theme', t);
+      document.querySelectorAll('.ttog button').forEach(x => x.classList.toggle('on', x === b));
+    });
+  });
+</script>
+</body>
+</html>
