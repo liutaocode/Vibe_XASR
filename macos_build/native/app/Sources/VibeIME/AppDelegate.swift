@@ -2,6 +2,7 @@ import AppKit
 import AVFoundation
 import SwiftUI
 import VibeUI
+import Sparkle
 import os
 
 /// Vibe XASR — menu-bar (LSUIElement-capable) push-to-talk dictation app.
@@ -36,7 +37,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var padItem: NSMenuItem!
     private var historyItem: NSMenuItem!
     private var rerunItem: NSMenuItem!
+    private var updateItem: NSMenuItem!
     private var quitItem: NSMenuItem!
+
+    // MARK: Auto-update (Sparkle)
+    /// Drives the appcast check / download / verify / install. `startingUpdater: true`
+    /// kicks off the scheduled background checks per Info.plist (SUEnableAutomaticChecks).
+    private let updaterController = SPUStandardUpdaterController(
+        startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil)
 
     // MARK: Settings (single source of truth)
     private let store = SettingsStore.shared
@@ -194,6 +202,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         rerunItem.target = self
         menu.addItem(rerunItem)
 
+        updateItem = NSMenuItem(title: L10n.shared.t("about.checkUpdate"),
+                                action: #selector(checkForUpdatesMenu), keyEquivalent: "")
+        updateItem.target = self
+        menu.addItem(updateItem)
+
         menu.addItem(.separator())
 
         quitItem = NSMenuItem(title: L10n.shared.t("menu.quit"), action: #selector(quit), keyEquivalent: "q")
@@ -211,6 +224,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         padItem?.title = L10n.shared.t("menu.pad")
         historyItem?.title = L10n.shared.t("menu.history")
         rerunItem?.title = L10n.shared.t("menu.rerun")
+        updateItem?.title = L10n.shared.t("about.checkUpdate")
         quitItem?.title = L10n.shared.t("menu.quit")
         // Refresh the dynamic status line if the engine is already up.
         if engineReady { statusMenuItem?.title = L10n.shared.t("menu.ready") }
@@ -227,6 +241,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     @objc private func quit() {
         NSApp.terminate(nil)
+    }
+
+    /// Status-menu "检查更新" → Sparkle user-initiated check.
+    @objc private func checkForUpdatesMenu() {
+        checkForUpdates()
     }
 
     @objc private func openSettings() {
@@ -999,6 +1018,14 @@ extension AppDelegate: SettingsBridge {
         case .accessibility:   Permissions.requestAccessibility()
         case .inputMonitoring: Permissions.requestInputMonitoring()
         }
+    }
+
+    /// SettingsBridge: the About tab's "检查更新" button → Sparkle's user-initiated check.
+    func checkForUpdates() {
+        // Bring the app forward so Sparkle's progress/alert windows are visible
+        // (we're an accessory/menu-bar app most of the time).
+        NSApp.activate(ignoringOtherApps: true)
+        updaterController.checkForUpdates(nil)
     }
 }
 

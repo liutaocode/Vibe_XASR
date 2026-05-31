@@ -25,3 +25,12 @@ windows_build/**/models/
 # Logs / scratch
 *.log
 /tmp/
+
+# stray local archive (do NOT commit — 1.9GB)
+/wind.zip
+
+# Claude 设计工具导出的原始设计对话/上传件 — 不公开(docs 只保留 index.html + 架构图 + appcast.xml)
+docs/chats/
+docs/project/
+docs/uploads/
+docs/README.md

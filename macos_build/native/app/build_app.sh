@@ -68,6 +68,16 @@ cp "$SHERPA_LIB/libonnxruntime.1.24.4.dylib"    "$APP/Contents/Frameworks/"
 # Provide the unversioned alias too (some loaders look it up by soname).
 ln -sf "libonnxruntime.1.24.4.dylib" "$APP/Contents/Frameworks/libonnxruntime.dylib"
 
+# Sparkle auto-update framework (universal). The app is NOT sandboxed, so Sparkle's
+# XPC services are unnecessary — drop them (smaller bundle, simpler signing).
+SPARKLE_FW_SRC="$B/native/third_party/sparkle/Sparkle.framework"
+if [ -d "$SPARKLE_FW_SRC" ]; then
+  cp -R "$SPARKLE_FW_SRC" "$APP/Contents/Frameworks/"
+  rm -rf "$APP/Contents/Frameworks/Sparkle.framework/Versions/B/XPCServices"
+else
+  echo "   WARN: Sparkle.framework not found at $SPARKLE_FW_SRC (auto-update will be unavailable)"
+fi
+
 echo "== [4/6] copy models + ui into Resources =="
 mkdir -p "$APP/Contents/Resources/asr" "$APP/Contents/Resources/firered"
 cp "$ASR_SRC/encoder-960ms.onnx" "$ASR_SRC/decoder-960ms.onnx" \
@@ -110,6 +120,13 @@ for dylib in "$APP/Contents/Frameworks/"*.dylib; do
   [ -L "$dylib" ] && continue
   codesign -s - --force --options runtime --timestamp=none "$dylib"
 done
+# Sparkle: sign nested helpers (innermost) first, then the framework.
+SPK="$APP/Contents/Frameworks/Sparkle.framework"
+if [ -d "$SPK" ]; then
+  codesign -s - --force --options runtime --timestamp=none "$SPK/Versions/B/Updater.app"
+  codesign -s - --force --options runtime --timestamp=none "$SPK/Versions/B/Autoupdate"
+  codesign -s - --force --options runtime --timestamp=none "$SPK"
+fi
 codesign -s - --force --options runtime --timestamp=none \
   --entitlements "$ENT_CLEAN" \
   "$APP"

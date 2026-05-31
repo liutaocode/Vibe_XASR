@@ -52,6 +52,11 @@ public protocol SettingsBridge: AnyObject {
     func accessibilityGranted() -> Bool
     func inputMonitoringGranted() -> Bool
     func openPermissionSettings(_ which: PermissionKind)
+
+    // ----- Auto-update (Sparkle, implemented in the app target) -----
+    /// User-initiated update check. The host drives Sparkle's updater UI
+    /// (checks the appcast, downloads + verifies + installs if a newer build exists).
+    func checkForUpdates()
 }
 
 /// Which permission a "open System Settings" button targets.
@@ -1069,6 +1074,7 @@ private struct RecordsTab: View {
 
 private struct AboutTab: View {
     @ObservedObject var l10n: L10n
+    weak var bridge: SettingsBridge?
     @Environment(\.colorScheme) private var scheme
     /// Secondary acknowledgments — the supporting OSS stack, shown small/below.
     private let secondaryCredits = ["sherpa-onnx", "FireRedVAD", "onnxruntime",
@@ -1083,9 +1089,26 @@ private struct AboutTab: View {
                     .shadow(color: Vibe.Palette.accentA.opacity(0.45), radius: 15, y: 10)
                 Text(l10n.t("app.name")).font(Vibe.Fonts.ui(22, weight: .bold))
                     .foregroundStyle(Vibe.Palette.text(scheme))
-                Text(String(format: l10n.t("about.version"), "0.1.0"))
+                Text(String(format: l10n.t("about.version"),
+                            Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.1.1"))
                     .font(Vibe.Fonts.mono(11.5))
                     .foregroundStyle(Vibe.Palette.textMuted(scheme))
+
+                // Sparkle update check — drives the host's updater (appcast on GitHub Pages).
+                Button { bridge?.checkForUpdates() } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "arrow.triangle.2.circlepath")
+                        Text(l10n.t("about.checkUpdate"))
+                    }
+                    .font(Vibe.Fonts.ui(12, weight: .medium))
+                    .foregroundStyle(Vibe.Palette.accentB)
+                    .padding(.horizontal, 14).padding(.vertical, 7)
+                    .background(
+                        Capsule().fill(Vibe.Palette.accentB.opacity(0.12))
+                    )
+                }
+                .buttonStyle(.plain)
+                .padding(.top, 4)
 
                 // (About) BIG, prominent X-ASR credit — the core ASR model this
                 // whole app is built around.
@@ -1305,7 +1328,7 @@ public struct SettingsView: View {
                     case "model":       ModelTab(s: s, l10n: l10n,
                                                  relay: ModelManagerRelay(manager))
                     case "permissions": PermissionsTab(s: s, l10n: l10n)
-                    default:            AboutTab(l10n: l10n)
+                    default:            AboutTab(l10n: l10n, bridge: bridge)
                     }
                 }
                 .padding(.vertical, 22).padding(.horizontal, 24)

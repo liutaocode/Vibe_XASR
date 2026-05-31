@@ -228,7 +228,7 @@ public final class L10n: ObservableObject {
         "perm.banner.warn": "Some permissions are missing; parts won't work. Open System Settings for each, then come back.",
 
         // Settings — About
-        "about.version": "Version %@ · macOS 13+ · Apple Silicon",
+        "about.version": "Version %@ · macOS 15+ · Universal (Apple Silicon + Intel)",
         "about.checkUpdate": "Check for updates",
         "about.credits": "Also built on",
         "about.local": "100% local · offline · your data never leaves the device",
@@ -378,7 +378,7 @@ public final class L10n: ObservableObject {
         "perm.banner.ok": "全部权限已授权,Vibe XASR 可以正常工作 ✓",
         "perm.banner.warn": "还有权限未开启,部分功能不可用。逐项「打开系统设置」后回到这里。",
 
-        "about.version": "版本 %@ · macOS 13+ · Apple Silicon",
+        "about.version": "版本 %@ · macOS 15+ · 通用版(Apple 芯片 + Intel)",
         "about.checkUpdate": "检查更新",
         "about.credits": "同时基于",
         "about.local": "100% 本地 · 不联网 · 数据不出设备",
@@ -524,7 +524,7 @@ public final class L10n: ObservableObject {
         "perm.banner.ok": "すべての権限が許可されています。Vibe XASR は正常に動作します ✓",
         "perm.banner.warn": "未許可の権限があります。一部機能が使えません。各項目で「システム設定を開く」後に戻ってください。",
 
-        "about.version": "バージョン %@ · macOS 13+ · Apple Silicon",
+        "about.version": "バージョン %@ · macOS 15+ · ユニバーサル(Apple Silicon + Intel)",
         "about.checkUpdate": "アップデートを確認",
         "about.credits": "さらに、次の技術を利用",
         "about.local": "100% ローカル · オフライン · データは端末外に出ません",
@@ -670,7 +670,7 @@ public final class L10n: ObservableObject {
         "perm.banner.ok": "모든 권한이 허용되었습니다 — Vibe XASR를 사용할 수 있습니다 ✓",
         "perm.banner.warn": "허용되지 않은 권한이 있어 일부 기능을 사용할 수 없습니다. 항목별로 ‘시스템 설정 열기’ 후 돌아오세요.",
 
-        "about.version": "버전 %@ · macOS 13+ · Apple Silicon",
+        "about.version": "버전 %@ · macOS 15+ · 유니버설(Apple Silicon + Intel)",
         "about.checkUpdate": "업데이트 확인",
         "about.credits": "또한 다음 기술 기반",
         "about.local": "100% 로컬 · 오프라인 · 데이터가 기기를 떠나지 않습니다",

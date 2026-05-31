@@ -23,6 +23,7 @@ let KNF = "\(B)/native/third_party/kaldi-native-fbank"      // include root for 
 let KISS = "\(B)/native/third_party/kissfft"                // kiss_fft.h / kiss_fftr.h
 let ORT_INC = "\(B)/native/third_party/onnxruntime/include" // 1.22 headers OK to compile against
 let SHERPA_LIB = "\(B)/native/sherpa/dist/sherpa-onnx-v1.13.2-osx-universal2-shared/lib"
+let SPARKLE_DIR = "\(B)/native/third_party/sparkle"          // contains Sparkle.framework (universal) — auto-update
 
 let package = Package(
     name: "VibeIME",
@@ -72,6 +73,10 @@ let package = Package(
                 "CSherpa",
             ],
             path: "Sources/VibeIME",
+            swiftSettings: [
+                // Find Sparkle.framework's module for `import Sparkle`.
+                .unsafeFlags(["-F", SPARKLE_DIR])
+            ],
             linkerSettings: [
                 .unsafeFlags([
                     // sherpa-onnx C API + its OWN onnxruntime 1.24.4 (one ORT only)
@@ -79,9 +84,13 @@ let package = Package(
                     "-lsherpa-onnx-c-api",
                     "-lonnxruntime",
                     "-lc++",
+                    // Sparkle auto-update framework
+                    "-F", SPARKLE_DIR,
+                    "-framework", "Sparkle",
                     // runtime: bundle layout first, then the dev lib dir as a fallback
                     "-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks",
                     "-Xlinker", "-rpath", "-Xlinker", SHERPA_LIB,
+                    "-Xlinker", "-rpath", "-Xlinker", SPARKLE_DIR,
                 ])
             ]
         ),
