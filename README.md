@@ -8,7 +8,10 @@ ONNX 模型)跨平台,各平台用各自原生外壳。
 
 | 目录 | 平台 | 状态 | 技术栈 |
 |---|---|---|---|
-| [`macos_build/`](macos_build/) | macOS 13+ · **Apple Silicon + Intel** | ✅ 已发布 v1.1.0(签名+公证) | Swift · SwiftUI/AppKit · sherpa-onnx |
+| [`macos_build/`](macos_build/) | **macOS 15+** · Apple Silicon + Intel | ✅ 已发布 v1.1.0(签名+公证) | Swift · SwiftUI/AppKit · sherpa-onnx |
+
+> 最低 **macOS 15 (Sequoia)** —— 受底层 onnxruntime 构建限制(它强引用了 macOS 15 的 CoreML 符号),
+> 在 macOS 13/14 上会启动失败。Intel Mac 需升级到 macOS 15 才能运行。
 | [`windows_build/`](windows_build/) | Windows 10/11 · x64 + arm64 | 🚧 框架骨架(在 Windows 上完成) | C# · .NET 8 · WinForms · sherpa-onnx |
 
 ## 共用的"识别内核"(两端一致)
