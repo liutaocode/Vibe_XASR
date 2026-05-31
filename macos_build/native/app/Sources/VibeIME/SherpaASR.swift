@@ -97,10 +97,12 @@ final class SherpaASR: StreamingASR {
         SherpaASR.normalizeCJK(recognizer.getResult().text)
     }
 
-    /// Finalize: pad 1.0 s of trailing zeros to flush the last zipformer2 chunk,
-    /// signal input-finished, drain, read the final text, then reset for reuse.
+    /// Finalize: pad trailing zeros to flush the last zipformer2 chunk, signal
+    /// input-finished, drain, read the final text, then reset for reuse.
     func finalizeSentence() -> String {
-        let tail = [Float](repeating: 0, count: sampleRate)   // 1.0 s of zeros
+        // 1.5 s of zeros — more trailing context so a soft/short final word still
+        // gets decoded (was 1.0 s; a quiet last syllable could get dropped).
+        let tail = [Float](repeating: 0, count: sampleRate * 3 / 2)
         recognizer.acceptWaveform(samples: tail, sampleRate: sampleRate)
         recognizer.inputFinished()
         while recognizer.isReady() {
@@ -108,6 +110,17 @@ final class SherpaASR: StreamingASR {
         }
         let text = SherpaASR.normalizeCJK(recognizer.getResult().text)
         recognizer.newStream()
-        return text
+        // The streaming model only emits a sentence's closing punctuation when it
+        // hears the NEXT sentence start, so the FINAL sentence never gets one. Add a
+        // sensible closing mark if it's missing.
+        return SherpaASR.ensureFinalPunct(text)
+    }
+
+    /// Append a closing 。 (CJK) or . (otherwise) when the final text doesn't already
+    /// end in punctuation.
+    static func ensureFinalPunct(_ text: String) -> String {
+        guard let last = text.last else { return text }
+        if cjkPunct.contains(last) || asciiPunct.contains(last) { return text }
+        return text + (isCJK(last) ? "。" : ".")
     }
 }

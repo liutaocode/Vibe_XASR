@@ -66,6 +66,9 @@ final class DictationEngine {
 
     /// Push-to-talk key up: finalize any in-flight sentence.
     func endSession() {
+        // Flush the trailing partial window (< windowSize samples) that never got
+        // processed — otherwise the last few ms (a soft final syllable) are dropped.
+        if active && !buffer.isEmpty { asr.accept(buffer) }
         if active { emitFinal() }
         buffer.removeAll()
         preroll.removeAll()
