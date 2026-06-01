@@ -524,8 +524,17 @@ public sealed class SettingsForm : Form
 
         var name = CenterLabel(L10n.T("app.name"), Theme.Ui(17f, FontStyle.Bold), Theme.Text, _innerWidth, y); y += 30;
         card.Controls.Add(name);
-        var ver = CenterLabel(L10n.T("about.version", "1.0.0"), Theme.Mono(8.5f), Theme.TextMuted, _innerWidth, y); y += 34;
+        var vv = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version ?? new Version(1, 0, 0);
+        var ver = CenterLabel(L10n.T("about.version", $"{vv.Major}.{vv.Minor}.{Math.Max(0, vv.Build)}"),
+                              Theme.Mono(8.5f), Theme.TextMuted, _innerWidth, y); y += 30;
         card.Controls.Add(ver);
+
+        // Check-for-updates (WinSparkle) — drives the EdDSA-signed appcast like macOS Sparkle.
+        var upd = new VibeButton { Text = L10n.T("about.checkUpdate"), Style = VibeButton.Kind.Ghost,
+                                   Size = new Size(120, 30) };
+        upd.Location = new Point(cx - upd.Width / 2, y);
+        upd.Click += (_, _) => Updater.CheckForUpdatesUi();
+        card.Controls.Add(upd); y += 30 + 12;
 
         // X-ASR credit card.
         var credit = new RoundedPanel { Fill = Theme.AccentSoft, Border = Color.FromArgb(102, Theme.AccentA),

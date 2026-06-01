@@ -26,6 +26,12 @@
 
     <!-- High-DPI aware tray/overlay; configured in code via ApplicationConfiguration too. -->
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+
+    <!-- App version — read at runtime (About tab + WinSparkle update comparison) and used as
+         the MSI ProductVersion. Bump for each release; keep in sync with the appcast feed. -->
+    <Version>1.1.2</Version>
+    <FileVersion>1.1.2.0</FileVersion>
+    <AssemblyVersion>1.1.2.0</AssemblyVersion>
   </PropertyGroup>
 
   <ItemGroup>
@@ -38,6 +44,19 @@
 
     <!-- WASAPI mic capture + resampling helpers. -->
     <PackageReference Include="NAudio" Version="2.2.1" />
+  </ItemGroup>
+
+  <!-- WinSparkle (auto-update) native DLL, x64. Copied beside the exe in publish + install dir;
+       loaded via a DllImportResolver from AppContext.BaseDirectory. MIT (third_party/winsparkle/COPYING). -->
+  <ItemGroup>
+    <None Include="..\..\third_party\winsparkle\WinSparkle.dll">
+      <Link>WinSparkle.dll</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      <!-- Keep it a loose file beside the single-file exe (not embedded), so the
+           DllImportResolver can load it from AppContext.BaseDirectory. -->
+      <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
+    </None>
   </ItemGroup>
 
 </Project>

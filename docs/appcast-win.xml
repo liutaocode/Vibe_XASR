@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Vibe XASR Windows auto-update feed (WinSparkle). Separate from appcast.xml (macOS/Sparkle).
+     Served via GitHub Pages at https://liutaocode.github.io/Vibe_XASR/appcast-win.xml
+     The enclosure MUST be the EdDSA-signed MSI attached to the GitHub Release. Sign it with
+     third_party/winsparkle/winsparkle-tool.exe (the "sign" subcommand with the private key
+     file), then paste the result into sparkle:edSignature and set length to the MSI byte size. -->
+<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+  <channel>
+    <title>Vibe XASR (Windows)</title>
+    <link>https://liutaocode.github.io/Vibe_XASR/appcast-win.xml</link>
+    <description>Vibe XASR Windows auto-update feed</description>
+    <language>zh</language>
+    <item>
+      <title>Vibe XASR 1.1.2</title>
+      <pubDate>Mon, 01 Jun 2026 08:08:54 +0800</pubDate>
+      <link>https://github.com/liutaocode/Vibe_XASR/releases/tag/v1.1.2</link>
+      <enclosure
+        url="https://github.com/liutaocode/Vibe_XASR/releases/download/v1.1.2/VibeXASR-1.1.2-windows-x64.msi"
+        sparkle:os="windows"
+        sparkle:version="1.1.2"
+        sparkle:shortVersionString="1.1.2"
+        sparkle:edSignature="qvBuekpMigBdu7o5QvIv6oCWUlIRaGx8KBtNkLs2t5HaeAMZIsjwtHC31uKx2IrK4c8CPHn1TDoK0BO2d86/Aw=="
+        length="625336320"
+        type="application/octet-stream" />
+    </item>
+  </channel>
+</rss>

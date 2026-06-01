@@ -13,6 +13,11 @@ models/
 *.onnx
 tokens.txt
 
+# EdDSA auto-update SIGNING KEY — secret, never commit. Back this up safely:
+# losing it means you can't sign future updates; leaking it lets others sign malicious ones.
+installer/eddsa_private.key
+*.key
+
 # IDE / OS cruft
 .vs/
 *.user

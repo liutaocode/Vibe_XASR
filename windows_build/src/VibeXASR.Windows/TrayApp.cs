@@ -89,6 +89,10 @@ public sealed class TrayApp : IDisposable, IAppController
         // settings/history/overlay hooks skip it for clean screenshots.
         if (string.IsNullOrEmpty(open) || open is "popup" or "rebind")
             _ = EnsureEngineAsync(swapping: false);
+        // Auto-update (WinSparkle): start automatic daily checks on a normal launch only —
+        // never during the screenshot/test hooks (settings/history/overlay/selftest…).
+        if (string.IsNullOrEmpty(open))
+            Updater.Initialize(_ui, Quit);
         switch (open)
         {
             case "settings": OpenSettings(openArg); break;
@@ -97,6 +101,7 @@ public sealed class TrayApp : IDisposable, IAppController
             case "rebind": SetHotkey(int.TryParse(openArg, out var vk) ? vk : 0x78); break; // live-rebind self-test
             case "selftest": _ = SelfTestAsync(openArg); break; // feed a WAV through the engine
             case "mictest": _ = MicTestAsync(); break; // capture real mic → save WAV → run ASR
+            case "checkupdate": Updater.Initialize(_ui, Quit); Updater.CheckForUpdatesUi(); break; // WinSparkle UI
             case "overlay":
                 _listening = true;
                 _overlay?.ShowListening();
@@ -719,6 +724,7 @@ public sealed class TrayApp : IDisposable, IAppController
 
     public void Dispose()
     {
+        Updater.Cleanup();
         _hotkey?.Dispose(); _hotkey = null;
         StopEngine();
         _overlay?.Dispose(); _overlay = null;

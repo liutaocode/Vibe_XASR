@@ -5,12 +5,13 @@
   shortcut. The app reads the bundled models from its install dir; extra tiers download
   to %APPDATA%\VibeXASR. Build with build-installer.ps1.
 -->
+<?ifndef Version ?><?define Version = "1.1.2.0" ?><?endif?>
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
      xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
 
   <Package Name="Vibe XASR"
            Manufacturer="Vibe XASR"
-           Version="1.0.0.0"
+           Version="$(var.Version)"
            UpgradeCode="6f2a1e90-1c5b-4d2a-9a3e-7b1c2d3e4f50"
            Scope="perUser"
            Compressed="yes">
@@ -38,6 +39,9 @@
     <ComponentGroup Id="AppFiles">
       <Component Directory="INSTALLFOLDER" Guid="*">
         <File Id="VibeXASR.exe" Source="payload\VibeXASR.exe" KeyPath="yes" />
+      </Component>
+      <Component Directory="INSTALLFOLDER" Guid="*">
+        <File Source="payload\WinSparkle.dll" KeyPath="yes" />
       </Component>
       <Component Directory="ModelsFolder" Guid="*">
         <File Source="payload\models\silero_vad.onnx" KeyPath="yes" />
