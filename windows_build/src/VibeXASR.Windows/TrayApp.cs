@@ -38,7 +38,13 @@ public sealed class TrayApp : IDisposable, IAppController
     private TrayPopupForm? _popup;
     private SettingsForm? _settingsForm;
     private HistoryForm? _historyForm;
+    private OnCallSessionForm? _onCallSessionForm;
     private DownloadForm? _dl;
+
+    // Ephemeral transcript of the CURRENT OnCall session (cleared when a session starts) —
+    // distinct from the persistent _history store; this is what the overlay "View" button shows
+    // (macOS OnCallLog parity). Mutated on the engine worker thread, read on the UI thread.
+    private readonly List<HistoryEntry> _onCallSession = new();
 
     private SynchronizationContext _ui = null!;
     private string _typedSoFar = string.Empty;
@@ -65,7 +71,7 @@ public sealed class TrayApp : IDisposable, IAppController
         _overlay = new OverlayForm();
         _overlay.CopyRequested += (_, _) => CopyOverlayText();
         _overlay.StopRequested += (_, _) => SetMode(DictationMode.Paste); // leave OnCall
-        _overlay.ViewRequested += (_, _) => OpenHistory();
+        _overlay.ViewRequested += (_, _) => OpenOnCallSession();
         _overlay.PauseRequested += (_, _) => TogglePause();
         // Realize the overlay handle so cross-thread BeginInvoke works immediately.
         _ = _overlay.Handle;
@@ -102,6 +108,15 @@ public sealed class TrayApp : IDisposable, IAppController
             case "selftest": _ = SelfTestAsync(openArg); break; // feed a WAV through the engine
             case "mictest": _ = MicTestAsync(); break; // capture real mic → save WAV → run ASR
             case "checkupdate": Updater.Initialize(_ui, Quit); Updater.CheckForUpdatesUi(); break; // WinSparkle UI
+            case "oncallsession": // populate a fake current-session log + open the session transcript view
+                lock (_onCallSession)
+                {
+                    _onCallSession.Add(new HistoryEntry { Text = "把这个 function 改成 async。", Mode = "oncall", Timestamp = DateTimeOffset.Now.AddSeconds(-42) });
+                    _onCallSession.Add(new HistoryEntry { Text = "顺便帮我加一个错误处理,别让它直接崩。", Mode = "oncall", Timestamp = DateTimeOffset.Now.AddSeconds(-18) });
+                    _onCallSession.Add(new HistoryEntry { Text = "Then write a unit test for the parser.", Mode = "oncall", Timestamp = DateTimeOffset.Now });
+                }
+                OpenOnCallSession();
+                break;
             case "overlay":
                 _listening = true;
                 _overlay?.ShowListening();
@@ -491,6 +506,9 @@ public sealed class TrayApp : IDisposable, IAppController
                 _overlay?.ShowInserted();
                 break;
             case DictationMode.OnCall:
+                lock (_onCallSession)
+                    _onCallSession.Add(new HistoryEntry { Text = e.Text.Trim(), Mode = "oncall", Timestamp = DateTimeOffset.Now });
+                RefreshOnCallSession();
                 _overlay?.SetText(e.Text);
                 break;
         }
@@ -554,6 +572,8 @@ public sealed class TrayApp : IDisposable, IAppController
     private void EnterOnCall()
     {
         if (_engine is not null) _engine.Mode = DictationMode.OnCall;
+        lock (_onCallSession) _onCallSession.Clear();   // fresh session log (macOS clears on start)
+        RefreshOnCallSession();
         _overlay?.ShowOnCall();
         _overlay?.SetText(string.Empty);
     }
@@ -670,6 +690,38 @@ public sealed class TrayApp : IDisposable, IAppController
         });
     }
 
+    /// <summary>Open the CURRENT OnCall session transcript (the overlay "View" button) — the
+    /// ephemeral per-session records, NOT the global history (macOS OnCallSessionView parity).</summary>
+    public void OpenOnCallSession()
+    {
+        RunOnUi(() =>
+        {
+            if (_onCallSessionForm is { IsDisposed: false })
+            { _onCallSessionForm.Reload(); _onCallSessionForm.Activate(); _onCallSessionForm.BringToFront(); return; }
+            _onCallSessionForm = new OnCallSessionForm(SnapshotOnCallSession) { Icon = Branding.AppIcon };
+            _onCallSessionForm.Show();
+            _onCallSessionForm.Activate();
+            _onCallSessionForm.BringToFront();
+        });
+    }
+
+    private IReadOnlyList<HistoryEntry> SnapshotOnCallSession()
+    {
+        lock (_onCallSession) return _onCallSession.ToList();
+    }
+
+    private void RefreshOnCallSession()
+    {
+        if (_onCallSessionForm is { IsDisposed: false }) RunOnUi(() => _onCallSessionForm?.Reload());
+    }
+
+    private string OnCallSessionText()
+    {
+        lock (_onCallSession)
+            return string.Join(Environment.NewLine,
+                _onCallSession.Select(e => $"[{e.Timestamp.LocalDateTime:yyyy-MM-dd HH:mm:ss}] {e.Text}"));
+    }
+
     public void Quit()
     {
         Dispose();
@@ -680,8 +732,16 @@ public sealed class TrayApp : IDisposable, IAppController
 
     private void CopyOverlayText()
     {
-        var text = _overlay?.CurrentText;
-        if (string.IsNullOrEmpty(text)) text = _history.List().FirstOrDefault()?.Text;
+        // OnCall: copy the WHOLE current session (timestamped), like macOS. PTT: copy the current
+        // overlay text, falling back to the most recent history entry.
+        string? text;
+        if (_settings.Mode == DictationMode.OnCall)
+            text = OnCallSessionText();
+        else
+        {
+            text = _overlay?.CurrentText;
+            if (string.IsNullOrEmpty(text)) text = _history.List().FirstOrDefault()?.Text;
+        }
         if (!string.IsNullOrEmpty(text))
             RunOnUi(() => { try { Clipboard.SetText(text!); } catch { } });
     }

@@ -241,18 +241,18 @@ public sealed class SettingsForm : Form
         };
         host.Controls.Add(caption);
 
-        (DictationMode mode, string title, string desc)[] modes =
+        (DictationMode mode, string title, string desc, string? warn)[] modes =
         {
-            (DictationMode.Paste, "dict.mode.paste.title", "dict.mode.paste.desc"),
-            (DictationMode.Type, "dict.mode.type.title", "dict.mode.type.desc"),
-            (DictationMode.OnCall, "dict.mode.oncall.title", "dict.mode.oncall.desc"),
+            (DictationMode.Paste, "dict.mode.paste.title", "dict.mode.paste.desc", null),
+            (DictationMode.Type, "dict.mode.type.title", "dict.mode.type.desc", "dict.mode.type.warn"),
+            (DictationMode.OnCall, "dict.mode.oncall.title", "dict.mode.oncall.desc", null),
         };
         int y = 40;
         int w = _innerWidth - 32;
         var cards = new List<DictationModeRow>();
-        foreach (var (mode, tk, dk) in modes)
+        foreach (var (mode, tk, dk, wk) in modes)
         {
-            var card = new DictationModeRow(L10n.T(tk), L10n.T(dk), w) { Selected = S.Mode == mode };
+            var card = new DictationModeRow(L10n.T(tk), L10n.T(dk), w, wk is null ? null : L10n.T(wk)) { Selected = S.Mode == mode };
             card.Location = new Point(16, y);
             var capturedMode = mode;
             card.Clicked += () =>
@@ -763,19 +763,22 @@ internal sealed class DictationModeRow : Control
 {
     private readonly string _title;
     private readonly string _desc;
+    private readonly string? _warning;
     private bool _selected;
     public bool Selected { get => _selected; set { _selected = value; Invalidate(); } }
     public event Action? Clicked;
 
-    public DictationModeRow(string title, string desc, int width)
+    public DictationModeRow(string title, string desc, int width, string? warning = null)
     {
-        _title = title; _desc = desc;
+        _title = title; _desc = desc; _warning = warning;
         DoubleBuffered = true; Cursor = Cursors.Hand;
         SetStyle(ControlStyles.SupportsTransparentBackColor, true);
         BackColor = Color.Transparent;
         Width = width;
-        int descH = SettingsForm.MeasureWrapped(desc, Theme.Ui(8.5f), width - 24 - 29);
-        Height = 11 + Theme.Ui(10f, FontStyle.Bold).Height + 3 + descH + 11;
+        int contentW = width - 24 - 29;
+        int descH = SettingsForm.MeasureWrapped(desc, Theme.Ui(8.5f), contentW);
+        int warnH = warning is null ? 0 : SettingsForm.MeasureWrapped(warning, Theme.Ui(8.5f, FontStyle.Bold), contentW) + 5;
+        Height = 11 + Theme.Ui(10f, FontStyle.Bold).Height + 3 + descH + warnH + 11;
     }
 
     protected override void OnClick(EventArgs e) { Clicked?.Invoke(); base.OnClick(e); }
@@ -802,8 +805,19 @@ internal sealed class DictationModeRow : Control
             Theme.Text, TextFormatFlags.Left | TextFormatFlags.NoPadding);
         var descFont = Theme.Ui(8.5f);
         int dy = 11 + titleFont.Height + 3;
-        TextRenderer.DrawText(g, _desc, descFont, new Rectangle(tx, dy, Width - tx - 12, Height - dy - 8),
+        int descW = Width - tx - 12;
+        int descH = SettingsForm.MeasureWrapped(_desc, descFont, descW);
+        TextRenderer.DrawText(g, _desc, descFont, new Rectangle(tx, dy, descW, descH),
             Theme.TextMuted, TextFormatFlags.Left | TextFormatFlags.WordBreak | TextFormatFlags.NoPadding);
+
+        // WeChat caveat (Type/逐字 mode): painted in the warning colour so it stands out.
+        if (_warning is not null)
+        {
+            var warnFont = Theme.Ui(8.5f, FontStyle.Bold);
+            int wy = dy + descH + 5;
+            TextRenderer.DrawText(g, _warning, warnFont, new Rectangle(tx, wy, descW, Height - wy - 8),
+                Theme.Warn, TextFormatFlags.Left | TextFormatFlags.WordBreak | TextFormatFlags.NoPadding);
+        }
     }
 }
 
