@@ -39,6 +39,7 @@ public sealed class TrayApp : IDisposable, IAppController
     private SettingsForm? _settingsForm;
     private HistoryForm? _historyForm;
     private OnCallSessionForm? _onCallSessionForm;
+    private OnboardingForm? _onboarding;
     private DownloadForm? _dl;
 
     // Ephemeral transcript of the CURRENT OnCall session (cleared when a session starts) —
@@ -99,6 +100,11 @@ public sealed class TrayApp : IDisposable, IAppController
         // never during the screenshot/test hooks (settings/history/overlay/selftest…).
         if (string.IsNullOrEmpty(open))
             Updater.Initialize(_ui, Quit);
+        // First launch ever: show the onboarding guide IMMEDIATELY (don't wait for the engine) —
+        // the user needs to know the app is in the bottom-right tray and that the engine is still
+        // preparing. The guide shows a live "preparing → ready" status.
+        if (string.IsNullOrEmpty(open) && !_settings.Welcomed)
+            ShowOnboarding();
         switch (open)
         {
             case "settings": OpenSettings(openArg); break;
@@ -108,6 +114,7 @@ public sealed class TrayApp : IDisposable, IAppController
             case "selftest": _ = SelfTestAsync(openArg); break; // feed a WAV through the engine
             case "mictest": _ = MicTestAsync(); break; // capture real mic → save WAV → run ASR
             case "checkupdate": Updater.Initialize(_ui, Quit); Updater.CheckForUpdatesUi(); break; // WinSparkle UI
+            case "onboard": ShowOnboarding(); break; // preview the first-run guide
             case "oncallsession": // populate a fake current-session log + open the session transcript view
                 lock (_onCallSession)
                 {
@@ -152,6 +159,7 @@ public sealed class TrayApp : IDisposable, IAppController
         menu.Opening += (_, _) => RebuildTrayMenu(menu);
         _tray.ContextMenuStrip = menu;
         RebuildTrayMenu(menu);
+        UpdateTrayStatus();
     }
 
     private void RebuildTrayMenu(ContextMenuStrip menu)
@@ -173,6 +181,7 @@ public sealed class TrayApp : IDisposable, IAppController
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(L10n.T("menu.history"), null, (_, _) => OpenHistory());
         menu.Items.Add(L10n.T("menu.settings"), null, (_, _) => OpenSettings());
+        menu.Items.Add(L10n.Resolved == Lang.Zh ? "使用引导" : "Quick start guide", null, (_, _) => ShowOnboarding());
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(L10n.T("menu.quit"), null, (_, _) => Quit());
     }
@@ -218,6 +227,7 @@ public sealed class TrayApp : IDisposable, IAppController
                 Diag.Log($"engine: READY (mic running={_mic?.IsRunning == true})");
                 if (_settings.Mode == DictationMode.OnCall) EnterOnCall();
                 _popup?.Invalidate();
+                UpdateTrayStatus();
                 AnnounceReady();
             });
         }
@@ -225,6 +235,7 @@ public sealed class TrayApp : IDisposable, IAppController
         {
             CloseDownloadDialog();
             Diag.Log("ENGINE FAILED: " + ex);
+            try { if (_tray is not null) _tray.Text = L10n.Resolved == Lang.Zh ? "Vibe XASR · 引擎加载失败" : "Vibe XASR · engine failed"; } catch { }
             _tray?.ShowBalloonTip(5000, "Vibe XASR",
                 "Model/engine failed: " + ex.Message, ToolTipIcon.Error);
         }
@@ -330,14 +341,11 @@ public sealed class TrayApp : IDisposable, IAppController
         if (_announcedReady || _tray is null) return;
         _announcedReady = true;
 
-        // First launch ever: a clear welcome/onboarding window (a toast is too easy to miss).
-        if (!_settings.Welcomed)
-        {
-            try { new WelcomeForm(this).Show(); return; }
-            catch (Exception ex) { Diag.Log("welcome failed: " + ex); }
-        }
+        // First launch: the onboarding window is already open (shown in Start) and flips its own
+        // status to "ready", so don't also fire a balloon. Once the user has been through the
+        // guide (Welcomed == true), a lightweight tray prompt with the hotkey hint is enough.
+        if (!_settings.Welcomed) return;
 
-        // Subsequent launches: a lightweight tray prompt with the hotkey hint.
         var key = VkNames.Name(_settings.HotkeyVk);
         bool zh = L10n.Resolved == Lang.Zh;
         string title = zh ? "Vibe XASR 已就绪" : "Vibe XASR is ready";
@@ -345,6 +353,41 @@ public sealed class TrayApp : IDisposable, IAppController
             ? (zh ? "持续候机已开启 · 识别结果显示在右上角悬浮窗" : "OnCall is on · live text shows top-right")
             : (zh ? $"按住 {key} 说话,松开即把文字落到光标处。" : $"Hold {key} and speak; release to drop the text.");
         try { _tray.ShowBalloonTip(6000, title, msg, ToolTipIcon.Info); } catch { }
+    }
+
+    /// <summary>Show the first-run onboarding guide (also re-runnable from the tray menu).</summary>
+    private void ShowOnboarding()
+    {
+        RunOnUi(() =>
+        {
+            try
+            {
+                if (_onboarding is { IsDisposed: false }) { _onboarding.Activate(); _onboarding.BringToFront(); return; }
+                _onboarding = new OnboardingForm(this);
+                _onboarding.FormClosed += (_, _) => _onboarding = null;
+                _onboarding.Show();
+            }
+            catch (Exception ex) { Diag.Log("onboarding failed: " + ex); }
+        });
+    }
+
+    /// <summary>Reflect engine state in the tray tooltip (the Windows analog of the macOS
+    /// status-bar text): preparing → ready / OnCall. Surfaces the slower-than-macOS model load so
+    /// the tray isn't silent while the user waits.</summary>
+    private void UpdateTrayStatus()
+    {
+        if (_tray is null) return;
+        bool zh = L10n.Resolved == Lang.Zh;
+        string s;
+        if (!_engineReady)
+            s = zh ? "Vibe XASR · 正在准备识别引擎…" : "Vibe XASR · preparing engine…";
+        else if (_settings.Mode == DictationMode.OnCall)
+            s = zh ? "Vibe XASR · 持续候机中" : "Vibe XASR · OnCall active";
+        else
+            s = zh ? $"Vibe XASR · 就绪,按住 {VkNames.Name(_settings.HotkeyVk)} 说话"
+                   : $"Vibe XASR · ready — hold {VkNames.Name(_settings.HotkeyVk)}";
+        if (s.Length > 63) s = s.Substring(0, 63);
+        try { _tray.Text = s; } catch { }
     }
 
     /// <summary>
@@ -757,6 +800,7 @@ public sealed class TrayApp : IDisposable, IAppController
         RunOnUi(() =>
         {
             _popup?.Invalidate();
+            UpdateTrayStatus();
             if (_tray?.ContextMenuStrip is { } m) RebuildTrayMenu(m);
         });
     }
