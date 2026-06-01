@@ -30,9 +30,7 @@ public sealed class StreamingAsr : IDisposable
             throw new InvalidOperationException(
                 $"ASR model files missing under {paths.TierDir}. Run ModelDownloader first.");
 
-        // ---- build sherpa-onnx config ----
-        // TODO(win): field names below match sherpa-onnx ~1.10.x. If restore pulls a different
-        // major, adjust property names (the library occasionally renames config fields).
+        // ---- build sherpa-onnx config (mirrors the macOS SherpaASR "verified recipe") ----
         var config = new OnlineRecognizerConfig();
 
         config.FeatConfig.SampleRate = _sampleRate;
@@ -42,22 +40,18 @@ public sealed class StreamingAsr : IDisposable
         config.ModelConfig.Transducer.Decoder = paths.Decoder;
         config.ModelConfig.Transducer.Joiner  = paths.Joiner;
         config.ModelConfig.Tokens = paths.Tokens;
-
-        // TODO(win): tune to match macOS. Number of CPU threads for ONNX Runtime.
+        config.ModelConfig.ModelType = "zipformer2"; // explicit, matching macOS
         config.ModelConfig.NumThreads = 2;
         config.ModelConfig.Provider = "cpu"; // "cpu" is safe on both x64 and arm64.
         config.ModelConfig.Debug = 0;
 
-        // Greedy search, matching the macOS engine.
         config.DecodingMethod = "greedy_search";
+        config.MaxActivePaths = 4;
 
-        // Endpointing: sherpa can flag an endpoint when speech stops. We mostly drive
-        // segmentation from our own VAD in DictationEngine, but enabling this gives the
-        // recognizer a sane internal reset boundary. TODO(win): mirror macOS rule timings.
-        config.EnableEndpoint = 1;
-        config.Rule1MinTrailingSilence = 2.4f;
-        config.Rule2MinTrailingSilence = 1.2f;
-        config.Rule3MinUtteranceLength = 20.0f;
+        // Endpointing OFF — segmentation is driven by our VAD (OnCall) / the hotkey
+        // (push-to-talk), exactly like the macOS engine. Letting sherpa fire its own
+        // endpoint would reset the stream mid-utterance and fragment the text.
+        config.EnableEndpoint = 0;
 
         _recognizer = new OnlineRecognizer(config);
         _stream = _recognizer.CreateStream();
@@ -71,11 +65,11 @@ public sealed class StreamingAsr : IDisposable
             _recognizer.Decode(_stream);
     }
 
-    /// <summary>Current incremental hypothesis (CJK de-spaced, edges trimmed).</summary>
+    /// <summary>Current incremental hypothesis (CJK-normalized, edges trimmed).</summary>
     public string Partial()
     {
         var result = _recognizer.GetResult(_stream);
-        return DeSpaceCjk(result.Text ?? string.Empty).Trim();
+        return NormalizeCjk(result.Text ?? string.Empty).Trim();
     }
 
     /// <summary>
@@ -91,15 +85,18 @@ public sealed class StreamingAsr : IDisposable
     /// </summary>
     public string Finalize()
     {
-        // Pad with a little trailing silence + signal end so the decoder drains the tail.
-        _stream.AcceptWaveform(_sampleRate, new float[_sampleRate / 2]); // 0.5 s of silence
+        // 1.5 s of trailing zeros + InputFinished so the last zipformer2 chunk is decoded —
+        // a soft/short final syllable would otherwise be dropped (was 0.5 s; matches macOS).
+        _stream.AcceptWaveform(_sampleRate, new float[_sampleRate * 3 / 2]);
         _stream.InputFinished();
         while (_recognizer.IsReady(_stream))
             _recognizer.Decode(_stream);
 
         var text = Partial();
         ResetStream();
-        return text;
+        // The streaming model only emits a sentence's closing punctuation when it hears the
+        // NEXT sentence, so the FINAL sentence never gets one — add it if missing.
+        return EnsureFinalPunct(text);
     }
 
     /// <summary>Start a fresh stream (utterance boundary). A new stream is used rather than
@@ -111,55 +108,53 @@ public sealed class StreamingAsr : IDisposable
         old?.Dispose();
     }
 
-    // ---- CJK de-spacing (port of the macOS post-processor) ----
+    // ---- CJK normalization (faithful port of the macOS SherpaASR.normalizeCJK) ----
+
+    private static readonly HashSet<char> CjkPunct =
+        new("，。！？；：、（）《》〈〉【】「」『』“”‘’".ToCharArray());
+    private static readonly HashSet<char> AsciiPunct = new(",.!?;:%)]}".ToCharArray());
+
+    private static bool IsCjk(char c) =>
+        (c >= 0x3400 && c <= 0x4DBF) || (c >= 0x4E00 && c <= 0x9FFF) || (c >= 0xF900 && c <= 0xFAFF);
+    private static bool IsCjkish(char c) => IsCjk(c) || CjkPunct.Contains(c);
 
     /// <summary>
-    /// The transducer emits a space between most tokens. For CJK text that produces
-    /// "你 好 世 界"; we want "你好世界". Rule (matching macOS): remove a space when BOTH
-    /// of its neighbours are CJK; keep the space when either side is a Latin/digit token
-    /// (so "hello 你好" and "数字 123" stay readable).
+    /// The zipformer BPE inserts spaces between tokens. Drop a space when (a) the next
+    /// non-space char is ASCII punctuation ("word ." → "word."), or (b) both neighbours are
+    /// CJK-ish ("你 好" → "你好"). Latin words keep their spaces ("hello 你好" stays readable).
     /// </summary>
-    public static string DeSpaceCjk(string text)
+    public static string NormalizeCjk(string text)
     {
         if (string.IsNullOrEmpty(text)) return text;
-
-        var sb = new StringBuilder(text.Length);
-
-        // We need lookbehind/lookahead around spaces; collect into a list of runes.
-        var list = new System.Collections.Generic.List<Rune>(text.Length);
-        foreach (var r in text.EnumerateRunes()) list.Add(r);
-
-        for (int i = 0; i < list.Count; i++)
+        var chars = text.ToCharArray();
+        var sb = new StringBuilder(chars.Length);
+        int i = 0;
+        while (i < chars.Length)
         {
-            var cur = list[i];
-            if (cur.Value == ' ')
+            char c = chars[i];
+            if (c == ' ')
             {
-                // Look at previous non-? and next rune.
-                bool prevCjk = i > 0 && IsCjk(list[i - 1]);
-                bool nextCjk = i + 1 < list.Count && IsCjk(list[i + 1]);
-                if (prevCjk && nextCjk)
-                    continue; // drop this space
+                char? prev = sb.Length > 0 ? sb[sb.Length - 1] : null;
+                int j = i + 1;
+                while (j < chars.Length && chars[j] == ' ') j++; // next non-space
+                char? next = j < chars.Length ? chars[j] : null;
+                bool dropAscii = next.HasValue && AsciiPunct.Contains(next.Value);
+                bool dropCjk = prev.HasValue && next.HasValue && IsCjkish(prev.Value) && IsCjkish(next.Value);
+                if (dropAscii || dropCjk) { i++; continue; } // drop this space
             }
-            sb.Append(cur.ToString());
+            sb.Append(c);
+            i++;
         }
         return sb.ToString();
     }
 
-    /// <summary>
-    /// Is this rune a CJK ideograph / kana / Hangul / fullwidth punctuation that should
-    /// abut its neighbours without a space?
-    /// </summary>
-    private static bool IsCjk(Rune r)
+    /// <summary>Append a closing 。 (CJK) or . (otherwise) when the final text lacks one.</summary>
+    public static string EnsureFinalPunct(string text)
     {
-        int c = r.Value;
-        return
-            (c >= 0x4E00 && c <= 0x9FFF)   || // CJK Unified Ideographs
-            (c >= 0x3400 && c <= 0x4DBF)   || // CJK Ext A
-            (c >= 0x20000 && c <= 0x2A6DF) || // CJK Ext B
-            (c >= 0x3040 && c <= 0x30FF)   || // Hiragana + Katakana
-            (c >= 0xAC00 && c <= 0xD7A3)   || // Hangul syllables
-            (c >= 0x3000 && c <= 0x303F)   || // CJK symbols & punctuation
-            (c >= 0xFF00 && c <= 0xFFEF);     // Halfwidth/Fullwidth forms
+        if (text.Length == 0) return text;
+        char last = text[^1];
+        if (CjkPunct.Contains(last) || AsciiPunct.Contains(last)) return text;
+        return text + (IsCjk(last) ? "。" : ".");
     }
 
     public void Dispose()

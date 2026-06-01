@@ -75,8 +75,19 @@ public sealed class DictationEngine : IDisposable
         }
     }
 
-    /// <summary>Pause OnCall capture without leaving the mode (the overlay Pause button).</summary>
-    public bool Paused { get; set; }
+    private bool _paused;
+    /// <summary>Pause OnCall capture without leaving the mode (the overlay Pause button).
+    /// Pausing finalizes the in-flight utterance so the last segment isn't lost (macOS
+    /// fix(oncall): "停止/暂停时确定 in-flight partial,不再丢失最后一段").</summary>
+    public bool Paused
+    {
+        get => _paused;
+        set
+        {
+            if (value && !_paused) _flushRequested = true; // commit in-flight before pausing
+            _paused = value;
+        }
+    }
 
     public event EventHandler<PartialEventArgs>? OnPartial;
     public event EventHandler<FinalEventArgs>? OnFinal;
