@@ -8,14 +8,16 @@ import VibeUI
 /// joiner-<tier>ms.onnx, tokens.txt — at repo path
 /// deployment/models/chunk-<tier>ms-model/<file>.
 ///
-/// Download SOURCE is HuggingFace only (the single verified working mirror):
-///   * https://huggingface.co/<repo>/resolve/main/<path>
+/// Two download SOURCES are supported, user-selectable in Settings:
+///   * ModelScope (DEFAULT, faster esp. in CN):
+///       https://www.modelscope.ai/models/Gilgamesh-J/X-ASR-zh-en/resolve/master/<path>
+///   * HuggingFace (alternative):
+///       https://huggingface.co/GilgameshWind/X-ASR-zh-en/resolve/main/<path>
 ///
-/// (Issue #4) The ModelScope line was removed: `GilgameshWind/X-ASR-zh-en` is not
-/// published on ModelScope (verified 2026-05-31 via curl — every owner casing 404s
-/// and the model-list search returns 0 hits), so the chooser only ever produced a
-/// 404→fallback round-trip. We now build the HuggingFace URL directly with no
-/// source picker, no probe, and no fallback branch.
+/// Both mirrors host the identical file tree, so only the host / repo owner /
+/// default branch differ (verified 2026-06-01: the ModelScope `.ai` international
+/// mirror serves every tier file with matching byte sizes). The chosen source is
+/// persisted in UserDefaults under `modelDownloadSource` and defaults to ModelScope.
 ///
 /// Each file is downloaded to a temp location, then moved into the tier dir; the
 /// whole tier dir is only considered "ready" once all four files are present, so
@@ -25,18 +27,30 @@ final class ModelDownloader: NSObject, ObservableObject, ModelManagerBridge, Mod
 
     static let shared = ModelDownloader()
 
-    /// Owner/name of the X-ASR streaming model on HuggingFace.
-    private let repo = "GilgameshWind/X-ASR-zh-en"            // HuggingFace repo id
+    /// HuggingFace coordinates.
+    private let hfRepo = "GilgameshWind/X-ASR-zh-en"          // HF repo id (owner casing)
     private let hfHost = "https://huggingface.co"
+    /// ModelScope coordinates (international `.ai` mirror; same file tree).
+    private let msRepo = "Gilgamesh-J/X-ASR-zh-en"            // MS repo id (different owner casing)
+    private let msHost = "https://www.modelscope.ai"
+
+    /// UserDefaults key persisting the chosen download source.
+    private static let sourceKey = "modelDownloadSource"
 
     /// Per-tier download state surfaced to the UI.
     @Published private(set) var progress: [Int: Double] = [:]   // tier → 0...1
     @Published private(set) var active: Set<Int> = []           // tiers downloading
     @Published private(set) var failed: Set<Int> = []           // tiers that errored
 
-    /// Download line is HuggingFace only (ModelScope removed, issue #4). Kept to
-    /// satisfy `ModelDownloadSourcing`; the setter is inert (no UI chooser exists).
-    @Published var source: ModelDownloadSource = .huggingFace
+    /// Chosen download source (ModelScope default). Persisted to UserDefaults on
+    /// change so the Settings picker survives relaunch. Satisfies `ModelDownloadSourcing`.
+    @Published var source: ModelDownloadSource {
+        didSet {
+            guard source != oldValue else { return }
+            UserDefaults.standard.set(source.rawValue, forKey: Self.sourceKey)
+            log("download source → \(source.label)")
+        }
+    }
 
     /// Bumped whenever an install completes/changes so SwiftUI re-queries
     /// `ModelPaths.tierAvailable` (which reads the filesystem).
@@ -55,6 +69,9 @@ final class ModelDownloader: NSObject, ObservableObject, ModelManagerBridge, Mod
     private var jobs: [Int: Job] = [:]
 
     override init() {
+        // Restore the persisted source; default to ModelScope when unset/invalid.
+        let raw = UserDefaults.standard.string(forKey: Self.sourceKey)
+        self.source = raw.flatMap(ModelDownloadSource.init(rawValue:)) ?? .modelScope
         super.init()
     }
 
@@ -76,9 +93,16 @@ final class ModelDownloader: NSObject, ObservableObject, ModelManagerBridge, Mod
         "deployment/models/chunk-\(tier.token)ms-model/\(file)"
     }
 
-    /// HuggingFace resolve URL — the single verified source (issue #4).
-    private func hfURL(tier: LatencyTier, file: String) -> URL {
-        URL(string: "\(hfHost)/\(repo)/resolve/main/\(relPath(tier: tier, file: file))")!
+    /// Resolve URL for the currently selected source. Both mirrors expose the same
+    /// file tree, so only host / repo owner / default branch differ.
+    private func resolveURL(tier: LatencyTier, file: String) -> URL {
+        let path = relPath(tier: tier, file: file)
+        switch source {
+        case .modelScope:
+            return URL(string: "\(msHost)/models/\(msRepo)/resolve/master/\(path)")!
+        case .huggingFace:
+            return URL(string: "\(hfHost)/\(hfRepo)/resolve/main/\(path)")!
+        }
     }
 
     // MARK: ModelManagerBridge
@@ -111,7 +135,7 @@ final class ModelDownloader: NSObject, ObservableObject, ModelManagerBridge, Mod
         progress[tier.rawValue] = 0
         let job = Job(tier: tier, files: needed, destDir: dir)
         jobs[tier.rawValue] = job
-        log("start tier=\(tier.token)ms via huggingFace — \(needed.count) file(s)")
+        log("start tier=\(tier.token)ms via \(source.label) — \(needed.count) file(s)")
         fetchNext(job)
     }
 
@@ -159,7 +183,7 @@ final class ModelDownloader: NSObject, ObservableObject, ModelManagerBridge, Mod
             log("tier=\(job.tier.token)ms complete")
             return
         }
-        start(file: file, for: job, url: hfURL(tier: job.tier, file: file))
+        start(file: file, for: job, url: resolveURL(tier: job.tier, file: file))
     }
 
     /// Kick off the current file's download task.

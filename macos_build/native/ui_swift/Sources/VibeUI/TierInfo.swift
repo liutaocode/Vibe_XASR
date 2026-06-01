@@ -2,7 +2,8 @@
 //  Vibe XASR — Latency-tier metadata (shared by UI + host)
 //
 //  The streaming chunk model comes in four sizes. Only chunk-960ms ships in the
-//  bundle; the others download on demand from HuggingFace. This file is the
+//  bundle; the others download on demand from the chosen mirror (ModelScope by
+//  default, or HuggingFace) — see SettingsView's source picker. This file is the
 //  single source of truth for the tier set, their L10n keys and approximate
 //  download size — referenced by both the SettingsView picker and the host's
 //  ModelDownloader.

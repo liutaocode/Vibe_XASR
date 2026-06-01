@@ -78,6 +78,22 @@ public enum ModelDownloadSource: String, CaseIterable, Sendable {
         case .huggingFace: return "HuggingFace"
         }
     }
+
+    /// Public model page for this source (opened when the value link is tapped).
+    public var repoURL: URL {
+        switch self {
+        case .modelScope:  return URL(string: "https://www.modelscope.ai/models/Gilgamesh-J/X-ASR-zh-en")!
+        case .huggingFace: return URL(string: "https://huggingface.co/GilgameshWind/X-ASR-zh-en")!
+        }
+    }
+
+    /// host/owner/name shown as the tappable monospace value under the picker.
+    public var repoDisplay: String {
+        switch self {
+        case .modelScope:  return "modelscope.ai/Gilgamesh-J/X-ASR-zh-en"
+        case .huggingFace: return "huggingface.co/GilgameshWind/X-ASR-zh-en"
+        }
+    }
 }
 
 /// UI-side seam for the download-line picker. The host's ModelDownloader (an
@@ -647,9 +663,8 @@ private struct ModelTab: View {
             SettingsGroup(label: l10n.t("grp.xasr")) {
                 // Headline crediting the core ASR model this app is built around.
                 ModelHeadline(l10n: l10n)
-                // (issue #4) No more source chooser — HuggingFace is the only line.
-                // Keep a subtle informational line so users know where models come from.
-                ModelSourceLine(l10n: l10n)
+                // Download-source chooser: ModelScope (default, faster) vs HuggingFace.
+                ModelSourceLine(l10n: l10n, relay: relay)
                 // Latency tier: a 2x2 of selectable scenario cards.
                 tierPicker
                 SettingsRow(title: l10n.t("model.aslang")) {
@@ -704,21 +719,49 @@ private struct ModelTab: View {
     }
 }
 
-/// (issue #4) Subtle informational line showing where models are downloaded from
-/// (HuggingFace) — replaces the removed source segmented picker. Tappable link.
+/// Download-source chooser: a segmented ModelScope / HuggingFace picker plus a
+/// tappable link to the chosen mirror's model page. ModelScope is the default
+/// (faster, esp. in CN). The choice is read/written through the host's
+/// ModelDownloader (reached via `relay.manager as? ModelDownloadSourcing`) and is
+/// persisted there; switching mid-download is safe (both mirrors share files).
 private struct ModelSourceLine: View {
     @Environment(\.colorScheme) private var scheme
     @ObservedObject var l10n: L10n
-    private let url = URL(string: "https://huggingface.co/GilgameshWind/X-ASR-zh-en")!
+    @ObservedObject var relay: ModelManagerRelay
+
+    private var sourcing: ModelDownloadSourcing? { relay.manager as? ModelDownloadSourcing }
+
     var body: some View {
-        SettingsRow(title: l10n.t("model.source")) {
-            Link(destination: url) {
-                Text(l10n.t("model.source.value"))
-                    .font(Vibe.Fonts.mono(11))
-                    .foregroundStyle(Vibe.Palette.accentB)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+        let current = sourcing?.source ?? .modelScope
+        VStack(alignment: .leading, spacing: 0) {
+            SettingsRow(title: l10n.t("model.source"), help: l10n.t("model.source.help")) {
+                Picker("", selection: Binding(
+                    get: { sourcing?.source ?? .modelScope },
+                    set: { sourcing?.source = $0 }
+                )) {
+                    ForEach(ModelDownloadSource.allCases, id: \.self) { src in
+                        Text(src.label).tag(src)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+                .fixedSize()
+                .disabled(sourcing == nil)
             }
+            // The chosen mirror's model page (tappable).
+            HStack(spacing: 0) {
+                Link(destination: current.repoURL) {
+                    Text(current.repoDisplay)
+                        .font(Vibe.Fonts.mono(11))
+                        .foregroundStyle(Vibe.Palette.accentB)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 10)
+            .background(Vibe.Palette.surface(scheme))
         }
     }
 }
