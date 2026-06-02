@@ -12,29 +12,24 @@
     <description>Vibe XASR Windows auto-update feed</description>
     <language>zh</language>
     <item>
-      <title>Vibe XASR 1.2.0.1-beta</title>
-      <pubDate>Tue, 02 Jun 2026 21:38:21 +0800</pubDate>
+      <title>Vibe XASR 1.2.0.2-beta</title>
+      <pubDate>Tue, 02 Jun 2026 22:34:57 +0800</pubDate>
       <link>https://github.com/liutaocode/Vibe_XASR/releases/tag/v1.2.0</link>
       <description><![CDATA[
-        <h3>Vibe XASR 1.2.0.1-beta (Windows)</h3>
+        <h3>Vibe XASR 1.2.0.2-beta (Windows)</h3>
         <ul>
-          <li>新增「词典」(与 macOS 1.2.0 同步):
-            <ul>
-              <li>热词加权:把人名 / 术语 / 专有名词加进词典,识别更偏向它们。</li>
-              <li>同音字纠正:把同音的字自动改成词典里的写法(贾阳清 → 贾扬清)。</li>
-              <li>文本替换:识别结果按「错 => 对」规则自动修正。</li>
-            </ul>
-          </li>
-          <li>在「设置 - 词典」中编辑词条、调节强度并开关各项功能。</li>
+          <li>「词典」设置页改为分页式行编辑器(与 macOS 新版一致):每个词条 / 替换规则单独一行,
+              可逐条增删,超过 5 条自动分页;强度用低 / 中 / 高分段选择。</li>
+          <li>词典三项功能不变(与 macOS 1.2.0 同步):热词加权、同音字纠正、文本替换。</li>
         </ul>
       ]]></description>
       <enclosure
-        url="https://github.com/liutaocode/Vibe_XASR/releases/download/v1.2.0/VibeXASR-1.2.0.1-windows-x64.msi"
+        url="https://github.com/liutaocode/Vibe_XASR/releases/download/v1.2.0/VibeXASR-1.2.0.2-windows-x64.msi"
         sparkle:os="windows"
-        sparkle:version="1.2.0.1"
-        sparkle:shortVersionString="1.2.0.1-beta"
-        sparkle:edSignature="MtNMDp+IdnPmkAIi4Xyt/QtCtAdUHyWrtTYb5C+JX/3+Qr1jSkQCVhIZEpfOwM2YOKAADmSwGPNAM5cMWu6SCg=="
-        length="628543488"
+        sparkle:version="1.2.0.2"
+        sparkle:shortVersionString="1.2.0.2-beta"
+        sparkle:edSignature="TLB/9PrAh7SK/oItQpy4CPhiXWCLFoQ3Kdiu18bRqCE5wWwA++YV0AE/KP0rjZFcUfH/1LIYSX5iOdreuKMXDQ=="
+        length="628531200"
         type="application/octet-stream" />
     </item>
   </channel>

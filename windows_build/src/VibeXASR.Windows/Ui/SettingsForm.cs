@@ -36,6 +36,18 @@ public sealed class SettingsForm : Form
     private Control? _switchBanner;
     private MicMeterControl? _micMeter;
 
+    // Dictionary (词典) tab — draft state that survives internal RebuildCurrentTab() calls
+    // (add / delete / page / typing) and only resets to the saved Settings on a real tab switch.
+    private sealed class DictRule { public string From = ""; public string To = ""; }
+    private List<string> _hwDraft = new();
+    private List<DictRule> _repDraft = new();
+    private string _hwTier = "mid";          // low | mid | high  → score 3 / 5 / 7
+    private int _hwPage, _repPage;
+    private bool _dictLoaded;
+    private Label? _hwCountLabel, _repCountLabel;
+    private const int DictPageSize = 5;
+    private const int DictMaxWords = 100, DictMaxRules = 100;
+
     private static readonly ModelTier[] Tiers =
         { ModelTier.Ms160, ModelTier.Ms480, ModelTier.Ms960, ModelTier.Ms1920 };
 
@@ -137,6 +149,7 @@ public sealed class SettingsForm : Form
 
     private void Select(string tab)
     {
+        if (tab != _tab) _dictLoaded = false;   // discard unsaved 词典 draft on a real tab change
         _tab = tab;
         foreach (var b in _tabButtons) b.Selected = b.Id == tab;
         RebuildCurrentTab();
@@ -515,84 +528,299 @@ public sealed class SettingsForm : Form
         return Row(title, help, cluster);
     }
 
-    // ---- Dictionary (词典): hotword bias + homophone correction + replacements ----
+    // ---- Dictionary (词典): paginated hotword bias + homophone correction + replacements ----
+    // Faithful port of the macOS HotwordsTab. Each hotword / rule is its own editable row with a
+    // delete button; lists paginate 5-per-page with a ‹ p / N › pager; a live count + a transient
+    // "✓ saved" flash sit by each Save button. Edits live in a draft (_hwDraft / _repDraft) and
+    // only commit on "Save & apply" (→ engine rebuild). The enable toggles apply live against the
+    // last-SAVED list (matching macOS applyHotwordsEnabled). RebuildCurrentTab() re-renders on
+    // add/delete/page; the draft resets to the saved Settings only on a real tab switch.
 
     private void BuildDictionary(Column col)
     {
-        bool zh = L10n.Resolved == Lang.Zh;
+        if (!_dictLoaded)
+        {
+            _hwDraft = ParseHwRows(S.HotwordsText);
+            _repDraft = ParseRepRows(S.ReplacementsText);
+            _hwTier = TierForScore(S.HotwordsScore);
+            _hwPage = 0; _repPage = 0;
+            _dictLoaded = true;
+        }
+        bool hwOn = S.HotwordsEnabled, repOn = S.ReplacementsEnabled;
 
-        // ===== Hotwords (加词偏置) =====
-        var hwEnable = Toggle(S.HotwordsEnabled, _ => { });          // read on Save & apply
-        var hwBox = MakeEditor(S.HotwordsText, 150);
-        var scoreSel = new VibeSelect
+        // ===== CUSTOM WORDS (自定义词) — contextual biasing =====
+        var score = new SegmentedControl
         {
-            Width = 150,
-            Options = new[] { ("3", zh ? "低" : "Low"), ("5", zh ? "中" : "Mid"), ("7", zh ? "高" : "High") },
-            Value = ((int)Math.Round(S.HotwordsScore)).ToString(),
+            Width = 180,
+            Options = new[] { ("low", L10n.T("hw.score.low")), ("mid", L10n.T("hw.score.mid")), ("high", L10n.T("hw.score.high")) },
+            Value = _hwTier,
         };
-        var pinyin = Toggle(S.PinyinFuzzyEnabled, on => _app.SetPinyinFuzzy(on));   // live
-        var hwSave = new VibeButton { Text = zh ? "保存并应用" : "Save & apply", Style = VibeButton.Kind.Solid, Size = new Size(124, 32) };
-        hwSave.Click += (_, _) =>
-        {
-            double score = double.TryParse(scoreSel.Value, out var sc) ? sc : 5.0;
-            _app.SetHotwords(hwEnable.Checked, hwBox.Text, score);
-        };
+        score.SelectionChanged += (_, v) => _hwTier = v;
 
-        col.AddGroup(zh ? "热词 · 加词偏置" : "Hotwords", new List<Control>
+        col.AddGroup(L10n.T("grp.hotwords"), new List<Control>
         {
-            Row(zh ? "启用热词" : "Enable hotwords",
-                zh ? "把人名 / 术语 / 专有名词加进来,识别更偏向它们。" : "Add names / jargon so the recognizer favours them.", hwEnable),
-            EditorHost(zh ? "每行一个词(中 / 英 / 混合):" : "One phrase per line (zh / en / mixed):", hwBox),
-            Row(zh ? "强度" : "Strength",
-                zh ? "中文用整体强度;英文会自动封顶以免变形。" : "CJK uses this strength; English is auto-capped to avoid distortion.", scoreSel),
-            Row(zh ? "同音字纠正" : "Homophone fix",
-                zh ? "把同音的字自动改成词典里的写法(贾阳清 → 贾扬清)。" : "Rewrite same-sounding chars to your dictionary spelling.", pinyin),
-            ButtonHost(hwSave),
+            Row(L10n.T("hw.enable"), L10n.T("hw.enable.help"),
+                Toggle(hwOn, on => { _app.SetHotwords(on, S.HotwordsText, S.HotwordsScore); RebuildCurrentTab(); })),
+            HwEditor(hwOn),
+            Row(L10n.T("hw.score"), L10n.T("hw.score.help"), score),
+            Row(L10n.T("hw.pinyin"), L10n.T("hw.pinyin.help"),
+                Toggle(S.PinyinFuzzyEnabled, on => _app.SetPinyinFuzzy(on))),
+            HwSaveRow(hwOn),
         });
 
-        // ===== Replacements (替换) =====
-        var repEnable = Toggle(S.ReplacementsEnabled, _ => { });
-        var repBox = MakeEditor(S.ReplacementsText, 120);
-        var repSave = new VibeButton { Text = zh ? "保存并应用" : "Save & apply", Style = VibeButton.Kind.Solid, Size = new Size(124, 32) };
-        repSave.Click += (_, _) => _app.SetReplacements(repEnable.Checked, repBox.Text);
-
-        col.AddGroup(zh ? "替换" : "Replacements", new List<Control>
+        // ===== REPLACEMENTS (替换) — post-recognition fixes =====
+        col.AddGroup(L10n.T("grp.replace"), new List<Control>
         {
-            Row(zh ? "启用替换" : "Enable replacements",
-                zh ? "识别结果出来后自动替换(纠正固定错词 / 品牌写法)。" : "Auto-fix the recognized text (brand spellings, stubborn errors).", repEnable),
-            EditorHost(zh ? "每行「错 => 对」:" : "One rule per line, \"from => to\":", repBox),
-            ButtonHost(repSave),
+            Row(L10n.T("rep.enable"), L10n.T("rep.enable.help"),
+                Toggle(repOn, on => { _app.SetReplacements(on, S.ReplacementsText); RebuildCurrentTab(); })),
+            RepEditor(repOn),
+            RepSaveRow(repOn),
         });
     }
 
-    private TextBox MakeEditor(string? text, int height) => new()
+    private Control HwEditor(bool enabled)
     {
-        Multiline = true, ScrollBars = ScrollBars.Vertical, WordWrap = false,
-        Font = Theme.Mono(10f), BackColor = Theme.Surface2, ForeColor = Theme.Text,
-        BorderStyle = BorderStyle.FixedSingle, Width = _innerWidth - 32, Height = height,
-        Text = (text ?? "").Replace("\r\n", "\n").Replace("\n", "\r\n"),
+        int w = _innerWidth;
+        var host = new Panel { BackColor = Theme.Surface, Width = w };
+        int y = 13;
+        host.Controls.Add(EditorTitle(L10n.T("hw.editor.title"), y, w)); y += 20;
+        int hh = MeasureWrapped(L10n.T("hw.editor.help"), Theme.Ui(9f), w - 32);
+        host.Controls.Add(EditorHelp(L10n.T("hw.editor.help"), y, w, hh)); y += hh + 9;
+
+        int pages = Math.Max(1, (_hwDraft.Count + DictPageSize - 1) / DictPageSize);
+        _hwPage = Math.Min(Math.Max(0, _hwPage), pages - 1);
+        if (_hwDraft.Count == 0)
+        {
+            host.Controls.Add(EmptyHint(L10n.T("hw.empty.hint"), y, w)); y += 30;
+        }
+        else
+        {
+            int lo = _hwPage * DictPageSize, hi = Math.Min(lo + DictPageSize, _hwDraft.Count);
+            for (int i = lo; i < hi; i++)
+            {
+                int idx = i;
+                var tb = new TextBox
+                {
+                    Font = Theme.Mono(10f), BackColor = Theme.Surface2, ForeColor = Theme.Text,
+                    BorderStyle = BorderStyle.FixedSingle, Location = new Point(16, y), Size = new Size(w - 32 - 38, 26),
+                    Text = _hwDraft[idx], Enabled = enabled,
+                };
+                tb.TextChanged += (_, _) => { if (idx < _hwDraft.Count) { _hwDraft[idx] = tb.Text; UpdateHwCount(); } };
+                host.Controls.Add(tb);
+                host.Controls.Add(DeleteButton(w - 32 - 30, y - 1, enabled, () =>
+                    { if (idx < _hwDraft.Count) { _hwDraft.RemoveAt(idx); RebuildCurrentTab(); } }));
+                y += 33;
+            }
+        }
+        if (pages > 1) { var pg = Pager(_hwPage, pages, p => { _hwPage = p; RebuildCurrentTab(); }, w); pg.Location = new Point(0, y); host.Controls.Add(pg); y += pg.Height; }
+
+        bool canAdd = enabled && _hwDraft.Count < DictMaxWords;
+        var add = new VibeButton
+        {
+            Text = _hwDraft.Count >= DictMaxWords ? L10n.T("hw.full") : "+  " + L10n.T("hw.add"),
+            Style = VibeButton.Kind.Ghost, Size = new Size(150, 30), Location = new Point(16, y + 4), Enabled = canAdd,
+        };
+        add.Click += (_, _) => { if (_hwDraft.Count < DictMaxWords) { _hwDraft.Add(""); _hwPage = (_hwDraft.Count - 1) / DictPageSize; RebuildCurrentTab(); } };
+        host.Controls.Add(add); y += 42;
+
+        host.Height = y;
+        return host;
+    }
+
+    private Control RepEditor(bool enabled)
+    {
+        int w = _innerWidth;
+        var host = new Panel { BackColor = Theme.Surface, Width = w };
+        int y = 13;
+        host.Controls.Add(EditorTitle(L10n.T("rep.editor.title"), y, w)); y += 20;
+        int hh = MeasureWrapped(L10n.T("rep.editor.help"), Theme.Ui(9f), w - 32);
+        host.Controls.Add(EditorHelp(L10n.T("rep.editor.help"), y, w, hh)); y += hh + 9;
+
+        int delW = 30, arrowW = 18, gap = 8;
+        int colW = (w - 32 - delW - arrowW - gap * 3) / 2;
+        int xFrom = 16, xArrow = xFrom + colW + gap, xTo = xArrow + arrowW + gap, xDel = xTo + colW + gap;
+
+        host.Controls.Add(ColHeader(L10n.T("rep.col.from"), xFrom, y, colW));
+        host.Controls.Add(ColHeader(L10n.T("rep.col.to"), xTo, y, colW)); y += 16;
+
+        int pages = Math.Max(1, (_repDraft.Count + DictPageSize - 1) / DictPageSize);
+        _repPage = Math.Min(Math.Max(0, _repPage), pages - 1);
+        if (_repDraft.Count == 0)
+        {
+            host.Controls.Add(EmptyHint(L10n.T("rep.empty.hint"), y, w)); y += 30;
+        }
+        else
+        {
+            int lo = _repPage * DictPageSize, hi = Math.Min(lo + DictPageSize, _repDraft.Count);
+            for (int i = lo; i < hi; i++)
+            {
+                int idx = i;
+                var from = new TextBox
+                {
+                    Font = Theme.Mono(10f), BackColor = Theme.Surface2, ForeColor = Theme.Text,
+                    BorderStyle = BorderStyle.FixedSingle, Location = new Point(xFrom, y), Size = new Size(colW, 26),
+                    Text = _repDraft[idx].From, Enabled = enabled,
+                };
+                from.TextChanged += (_, _) => { if (idx < _repDraft.Count) { _repDraft[idx].From = from.Text; UpdateRepCount(); } };
+                var to = new TextBox
+                {
+                    Font = Theme.Mono(10f), BackColor = Theme.Surface2, ForeColor = Theme.Text,
+                    BorderStyle = BorderStyle.FixedSingle, Location = new Point(xTo, y), Size = new Size(colW, 26),
+                    Text = _repDraft[idx].To, Enabled = enabled,
+                };
+                to.TextChanged += (_, _) => { if (idx < _repDraft.Count) { _repDraft[idx].To = to.Text; } };
+                host.Controls.Add(from);
+                host.Controls.Add(new Label { Text = "→", Font = Theme.Ui(10.5f), ForeColor = Theme.TextMuted, AutoSize = false, Location = new Point(xArrow, y), Size = new Size(arrowW, 26), TextAlign = ContentAlignment.MiddleCenter, BackColor = Color.Transparent });
+                host.Controls.Add(to);
+                host.Controls.Add(DeleteButton(xDel, y - 1, enabled, () =>
+                    { if (idx < _repDraft.Count) { _repDraft.RemoveAt(idx); RebuildCurrentTab(); } }));
+                y += 33;
+            }
+        }
+        if (pages > 1) { var pg = Pager(_repPage, pages, p => { _repPage = p; RebuildCurrentTab(); }, w); pg.Location = new Point(0, y); host.Controls.Add(pg); y += pg.Height; }
+
+        bool canAdd = enabled && _repDraft.Count < DictMaxRules;
+        var add = new VibeButton
+        {
+            Text = _repDraft.Count >= DictMaxRules ? L10n.T("hw.full") : "+  " + L10n.T("rep.add"),
+            Style = VibeButton.Kind.Ghost, Size = new Size(150, 30), Location = new Point(16, y + 4), Enabled = canAdd,
+        };
+        add.Click += (_, _) => { if (_repDraft.Count < DictMaxRules) { _repDraft.Add(new DictRule()); _repPage = (_repDraft.Count - 1) / DictPageSize; RebuildCurrentTab(); } };
+        host.Controls.Add(add); y += 42;
+
+        host.Height = y;
+        return host;
+    }
+
+    private Control HwSaveRow(bool enabled)
+    {
+        int w = _innerWidth;
+        var host = new Panel { BackColor = Theme.Surface, Width = w, Height = 50 };
+        _hwCountLabel = new Label { Text = L10n.T("hw.count", CountWords(_hwDraft)), Font = Theme.Mono(9.5f), ForeColor = Theme.TextMuted, AutoSize = true, Location = new Point(16, 17), BackColor = Color.Transparent };
+        var saved = new Label { Text = L10n.T("hw.saved"), Font = Theme.Ui(9.5f), ForeColor = Theme.Success, AutoSize = true, Visible = false, BackColor = Color.Transparent };
+        var save = new VibeButton { Text = L10n.T("hw.save"), Style = VibeButton.Kind.Solid, Size = new Size(128, 32), Location = new Point(w - 128 - 16, 9), Enabled = enabled };
+        save.Click += (_, _) =>
+        {
+            _app.SetHotwords(S.HotwordsEnabled, SerializeHwRows(_hwDraft), ScoreForTier(_hwTier));
+            saved.Location = new Point(save.Left - saved.PreferredWidth - 12, 17);
+            Flash(saved);
+        };
+        host.Controls.Add(_hwCountLabel); host.Controls.Add(saved); host.Controls.Add(save);
+        return host;
+    }
+
+    private Control RepSaveRow(bool enabled)
+    {
+        int w = _innerWidth;
+        var host = new Panel { BackColor = Theme.Surface, Width = w, Height = 50 };
+        _repCountLabel = new Label { Text = L10n.T("rep.count", CountRules(_repDraft)), Font = Theme.Mono(9.5f), ForeColor = Theme.TextMuted, AutoSize = true, Location = new Point(16, 17), BackColor = Color.Transparent };
+        var saved = new Label { Text = L10n.T("hw.saved"), Font = Theme.Ui(9.5f), ForeColor = Theme.Success, AutoSize = true, Visible = false, BackColor = Color.Transparent };
+        var save = new VibeButton { Text = L10n.T("hw.save"), Style = VibeButton.Kind.Solid, Size = new Size(128, 32), Location = new Point(w - 128 - 16, 9), Enabled = enabled };
+        save.Click += (_, _) =>
+        {
+            _app.SetReplacements(S.ReplacementsEnabled, SerializeRepRows(_repDraft));
+            saved.Location = new Point(save.Left - saved.PreferredWidth - 12, 17);
+            Flash(saved);
+        };
+        host.Controls.Add(_repCountLabel); host.Controls.Add(saved); host.Controls.Add(save);
+        return host;
+    }
+
+    // ---- 词典 small builders + helpers ----
+
+    private static Label EditorTitle(string text, int y, int w) => new()
+    {
+        Text = text, Font = Theme.Ui(10.5f, FontStyle.Bold), ForeColor = Theme.Text, AutoSize = false,
+        Location = new Point(16, y), Size = new Size(w - 32, 18), BackColor = Color.Transparent,
     };
-
-    private Control EditorHost(string caption, TextBox box)
+    private static Label EditorHelp(string text, int y, int w, int h) => new()
     {
-        var host = new Panel { BackColor = Theme.Surface, Width = _innerWidth, Height = box.Height + 28 };
-        host.Controls.Add(new Label
+        Text = text, Font = Theme.Ui(9f), ForeColor = Theme.TextMuted, AutoSize = false,
+        Location = new Point(16, y), Size = new Size(w - 32, h), BackColor = Color.Transparent,
+    };
+    private static Label EmptyHint(string text, int y, int w) => new()
+    {
+        Text = text, Font = Theme.Mono(9.5f), ForeColor = Theme.TextMuted, AutoSize = false,
+        Location = new Point(16, y), Size = new Size(w - 32, 22), TextAlign = ContentAlignment.MiddleCenter, BackColor = Color.Transparent,
+    };
+    private static Label ColHeader(string text, int x, int y, int w) => new()
+    {
+        Text = text, Font = Theme.Mono(8f), ForeColor = Theme.TextMuted, AutoSize = false,
+        Location = new Point(x, y), Size = new Size(w, 14), BackColor = Color.Transparent,
+    };
+    private static VibeButton DeleteButton(int x, int y, bool enabled, Action onClick)
+    {
+        var b = new VibeButton { Text = "✕", Style = VibeButton.Kind.Danger, Size = new Size(30, 28), Location = new Point(x, y), Enabled = enabled };
+        b.Click += (_, _) => onClick();
+        return b;
+    }
+
+    private Control Pager(int page, int pages, Action<int> go, int w)
+    {
+        var host = new Panel { BackColor = Theme.Surface, Width = w, Height = 32 };
+        var prev = new VibeButton { Text = "‹", Style = VibeButton.Kind.Ghost, Size = new Size(32, 24), Enabled = page > 0 };
+        var lbl = new Label { Text = $"{page + 1} / {pages}", Font = Theme.Mono(9.5f), ForeColor = Theme.TextMuted, AutoSize = false, Size = new Size(64, 24), TextAlign = ContentAlignment.MiddleCenter, BackColor = Color.Transparent };
+        var next = new VibeButton { Text = "›", Style = VibeButton.Kind.Ghost, Size = new Size(32, 24), Enabled = page < pages - 1 };
+        int sx = (w - (32 + 8 + 64 + 8 + 32)) / 2;
+        prev.Location = new Point(sx, 4); lbl.Location = new Point(sx + 40, 4); next.Location = new Point(sx + 40 + 72, 4);
+        int p = page;
+        prev.Click += (_, _) => { if (p > 0) go(p - 1); };
+        next.Click += (_, _) => { if (p < pages - 1) go(p + 1); };
+        host.Controls.Add(prev); host.Controls.Add(lbl); host.Controls.Add(next);
+        return host;
+    }
+
+    private void Flash(Label lbl)
+    {
+        if (lbl.IsDisposed) return;
+        lbl.Visible = true;
+        var t = new System.Windows.Forms.Timer { Interval = 1600 };
+        t.Tick += (_, _) => { t.Stop(); t.Dispose(); if (!lbl.IsDisposed) lbl.Visible = false; };
+        t.Start();
+    }
+
+    private void UpdateHwCount() { if (_hwCountLabel is { IsDisposed: false }) _hwCountLabel.Text = L10n.T("hw.count", CountWords(_hwDraft)); }
+    private void UpdateRepCount() { if (_repCountLabel is { IsDisposed: false }) _repCountLabel.Text = L10n.T("rep.count", CountRules(_repDraft)); }
+
+    private static int CountWords(List<string> rows) => rows.Count(x => !string.IsNullOrWhiteSpace(x));
+    private static int CountRules(List<DictRule> rows) => rows.Count(r => !string.IsNullOrWhiteSpace(r.From));
+
+    private static List<string> ParseHwRows(string? text)
+    {
+        var list = new List<string>();
+        foreach (var raw in (text ?? "").Split('\n', '\r'))
         {
-            Text = caption, Font = Theme.Ui(9.5f), ForeColor = Theme.TextMuted, AutoSize = false,
-            Location = new Point(16, 4), Size = new Size(_innerWidth - 32, 18), BackColor = Color.Transparent,
-        });
-        box.Location = new Point(16, 24);
-        host.Controls.Add(box);
-        return host;
+            var wd = raw.Trim();
+            if (wd.Length == 0 || wd.StartsWith("#")) continue;
+            list.Add(wd);
+        }
+        return list;
     }
+    private static string SerializeHwRows(List<string> rows)
+        => string.Join("\n", rows.Select(x => x.Trim()).Where(x => x.Length > 0));
 
-    private Control ButtonHost(VibeButton btn)
+    private static List<DictRule> ParseRepRows(string? text)
     {
-        var host = new Panel { BackColor = Theme.Surface, Width = _innerWidth, Height = 48 };
-        btn.Location = new Point(_innerWidth - btn.Width - 16, 8);
-        host.Controls.Add(btn);
-        return host;
+        var list = new List<DictRule>();
+        foreach (var raw in (text ?? "").Split('\n', '\r'))
+        {
+            var line = raw.Trim();
+            if (line.Length == 0 || line.StartsWith("#")) continue;
+            int sep = line.IndexOf("=>", StringComparison.Ordinal);
+            if (sep < 0) sep = line.IndexOf("->", StringComparison.Ordinal);
+            if (sep < 0) continue;
+            var from = line.Substring(0, sep).Trim();
+            var to = line.Substring(sep + 2).Trim();
+            if (from.Length == 0) continue;
+            list.Add(new DictRule { From = from, To = to });
+        }
+        return list;
     }
+    private static string SerializeRepRows(List<DictRule> rows)
+        => string.Join("\n", rows.Where(r => !string.IsNullOrWhiteSpace(r.From)).Select(r => $"{r.From.Trim()} => {r.To.Trim()}"));
+
+    private static string TierForScore(double s) => s < 4 ? "low" : (s < 6 ? "mid" : "high");
+    private static double ScoreForTier(string t) => t == "low" ? 3.0 : (t == "high" ? 7.0 : 5.0);
 
     // ---- About ----
 
