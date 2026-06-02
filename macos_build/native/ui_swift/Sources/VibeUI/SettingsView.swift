@@ -1137,27 +1137,26 @@ private struct AboutTab: View {
                     .font(Vibe.Fonts.mono(11.5))
                     .foregroundStyle(Vibe.Palette.textMuted(scheme))
 
-                // Update check + feedback entry, side by side.
-                HStack(spacing: 10) {
-                    // Sparkle update check — drives the host's updater (appcast on GitHub Pages).
-                    Button { bridge?.checkForUpdates() } label: {
-                        HStack(spacing: 6) {
-                            Image(systemName: "arrow.triangle.2.circlepath")
-                            Text(l10n.t("about.checkUpdate"))
-                        }
-                        .font(Vibe.Fonts.ui(12, weight: .medium))
-                        .foregroundStyle(Vibe.Palette.accentB)
-                        .padding(.horizontal, 14).padding(.vertical, 7)
-                        .background(
-                            Capsule().fill(Vibe.Palette.accentB.opacity(0.12))
-                        )
+                // Sparkle update check — drives the host's updater (appcast on GitHub Pages).
+                Button { bridge?.checkForUpdates() } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "arrow.triangle.2.circlepath")
+                        Text(l10n.t("about.checkUpdate"))
                     }
-                    .buttonStyle(.plain)
-
-                    // Feedback entry — to the RIGHT of "Check for updates".
-                    FeedbackButton(l10n: l10n)
+                    .font(Vibe.Fonts.ui(12, weight: .medium))
+                    .foregroundStyle(Vibe.Palette.accentB)
+                    .padding(.horizontal, 14).padding(.vertical, 7)
+                    .background(
+                        Capsule().fill(Vibe.Palette.accentB.opacity(0.12))
+                    )
                 }
+                .buttonStyle(.plain)
                 .padding(.top, 4)
+
+                // Two distinct feedback channels as small text below "Check for updates":
+                // ① X-ASR engine issues   ② this app's features & requests.
+                FeedbackLinks(l10n: l10n)
+                    .padding(.top, 9)
 
                 // (About) BIG, prominent X-ASR credit — the core ASR model this
                 // whole app is built around.
@@ -1186,52 +1185,34 @@ private struct AboutTab: View {
     }
 }
 
-/// "功能反馈" entry next to Check-for-Updates. Tapping shows a short how-to
-/// popover (what to describe + how to submit), then a button opens the repo's
-/// Pull Requests page where users file feedback / feature requests.
-private struct FeedbackButton: View {
+/// Two distinct feedback channels shown as small text under "Check for updates":
+///   ①  X-ASR **engine** issues  → Gilgamesh-J/X-ASR/issues
+///   ②  this **app's** features & requests → liutaocode/Vibe_XASR/issues
+/// Keeping them separate routes engine bugs vs app feedback to the right repo.
+private struct FeedbackLinks: View {
     @ObservedObject var l10n: L10n
     @Environment(\.colorScheme) private var scheme
-    @State private var showGuide = false
-    private let prURL = URL(string: "https://github.com/liutaocode/Vibe_XASR/pulls")!
+    private let engineURL = URL(string: "https://github.com/Gilgamesh-J/X-ASR/issues")!
+    private let appURL = URL(string: "https://github.com/liutaocode/Vibe_XASR/issues")!
     var body: some View {
-        Button { showGuide = true } label: {
-            HStack(spacing: 6) {
-                Image(systemName: "exclamationmark.bubble")
-                Text(l10n.t("about.feedback"))
+        VStack(spacing: 6) {
+            row(icon: "waveform", text: l10n.t("about.fb.engine"), url: engineURL)
+            row(icon: "macwindow", text: l10n.t("about.fb.app"), url: appURL)
+        }
+    }
+    private func row(icon: String, text: String, url: URL) -> some View {
+        Link(destination: url) {
+            HStack(spacing: 5) {
+                Image(systemName: icon).font(.system(size: 10))
+                Text(text)
+                Image(systemName: "arrow.up.right")
+                    .font(.system(size: 8, weight: .semibold)).opacity(0.7)
             }
-            .font(Vibe.Fonts.ui(12, weight: .medium))
-            .foregroundStyle(Vibe.Palette.accentB)
-            .padding(.horizontal, 14).padding(.vertical, 7)
-            .background(Capsule().fill(Vibe.Palette.accentB.opacity(0.12)))
+            .font(Vibe.Fonts.ui(11))
+            .foregroundStyle(Vibe.Palette.textMuted(scheme))
         }
         .buttonStyle(.plain)
-        .popover(isPresented: $showGuide, arrowEdge: .bottom) {
-            VStack(alignment: .leading, spacing: 12) {
-                Text(l10n.t("about.feedback.title"))
-                    .font(Vibe.Fonts.ui(14, weight: .bold))
-                    .foregroundStyle(Vibe.Palette.text(scheme))
-                Text(l10n.t("about.feedback.guide"))
-                    .font(Vibe.Fonts.ui(12))
-                    .foregroundStyle(Vibe.Palette.textMuted(scheme))
-                    .fixedSize(horizontal: false, vertical: true)
-                    .lineSpacing(3)
-                Link(destination: prURL) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "arrow.up.forward.app")
-                        Text(l10n.t("about.feedback.go"))
-                    }
-                    .font(Vibe.Fonts.ui(12, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 9)
-                    .background(Capsule().fill(Vibe.Palette.accentB))
-                }
-                .buttonStyle(.plain)
-            }
-            .padding(18)
-            .frame(width: 330)
-        }
+        .help(url.absoluteString)
     }
 }
 
