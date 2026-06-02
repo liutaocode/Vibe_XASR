@@ -1137,20 +1137,26 @@ private struct AboutTab: View {
                     .font(Vibe.Fonts.mono(11.5))
                     .foregroundStyle(Vibe.Palette.textMuted(scheme))
 
-                // Sparkle update check — drives the host's updater (appcast on GitHub Pages).
-                Button { bridge?.checkForUpdates() } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "arrow.triangle.2.circlepath")
-                        Text(l10n.t("about.checkUpdate"))
+                // Update check + feedback entry, side by side.
+                HStack(spacing: 10) {
+                    // Sparkle update check — drives the host's updater (appcast on GitHub Pages).
+                    Button { bridge?.checkForUpdates() } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "arrow.triangle.2.circlepath")
+                            Text(l10n.t("about.checkUpdate"))
+                        }
+                        .font(Vibe.Fonts.ui(12, weight: .medium))
+                        .foregroundStyle(Vibe.Palette.accentB)
+                        .padding(.horizontal, 14).padding(.vertical, 7)
+                        .background(
+                            Capsule().fill(Vibe.Palette.accentB.opacity(0.12))
+                        )
                     }
-                    .font(Vibe.Fonts.ui(12, weight: .medium))
-                    .foregroundStyle(Vibe.Palette.accentB)
-                    .padding(.horizontal, 14).padding(.vertical, 7)
-                    .background(
-                        Capsule().fill(Vibe.Palette.accentB.opacity(0.12))
-                    )
+                    .buttonStyle(.plain)
+
+                    // Feedback entry — to the RIGHT of "Check for updates".
+                    FeedbackButton(l10n: l10n)
                 }
-                .buttonStyle(.plain)
                 .padding(.top, 4)
 
                 // (About) BIG, prominent X-ASR credit — the core ASR model this
@@ -1176,6 +1182,55 @@ private struct AboutTab: View {
             .frame(maxWidth: .infinity)
             .padding(.vertical, 36).padding(.horizontal, 24)
             .background(Vibe.Palette.surface(scheme))
+        }
+    }
+}
+
+/// "功能反馈" entry next to Check-for-Updates. Tapping shows a short how-to
+/// popover (what to describe + how to submit), then a button opens the repo's
+/// Pull Requests page where users file feedback / feature requests.
+private struct FeedbackButton: View {
+    @ObservedObject var l10n: L10n
+    @Environment(\.colorScheme) private var scheme
+    @State private var showGuide = false
+    private let prURL = URL(string: "https://github.com/liutaocode/Vibe_XASR/pulls")!
+    var body: some View {
+        Button { showGuide = true } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "exclamationmark.bubble")
+                Text(l10n.t("about.feedback"))
+            }
+            .font(Vibe.Fonts.ui(12, weight: .medium))
+            .foregroundStyle(Vibe.Palette.accentB)
+            .padding(.horizontal, 14).padding(.vertical, 7)
+            .background(Capsule().fill(Vibe.Palette.accentB.opacity(0.12)))
+        }
+        .buttonStyle(.plain)
+        .popover(isPresented: $showGuide, arrowEdge: .bottom) {
+            VStack(alignment: .leading, spacing: 12) {
+                Text(l10n.t("about.feedback.title"))
+                    .font(Vibe.Fonts.ui(14, weight: .bold))
+                    .foregroundStyle(Vibe.Palette.text(scheme))
+                Text(l10n.t("about.feedback.guide"))
+                    .font(Vibe.Fonts.ui(12))
+                    .foregroundStyle(Vibe.Palette.textMuted(scheme))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .lineSpacing(3)
+                Link(destination: prURL) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "arrow.up.forward.app")
+                        Text(l10n.t("about.feedback.go"))
+                    }
+                    .font(Vibe.Fonts.ui(12, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 9)
+                    .background(Capsule().fill(Vibe.Palette.accentB))
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(18)
+            .frame(width: 330)
         }
     }
 }
