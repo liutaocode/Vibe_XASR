@@ -40,6 +40,10 @@ public protocol SettingsBridge: AnyObject {
     var launchAtLogin: Bool { get set }
     /// Leave each dictation result on the clipboard (issue #12). Default OFF.
     var clipboardOverwrite: Bool { get set }
+    /// Typeless-style cue sound on dictation start/stop. Default ON. Setting
+    /// `cueTheme` (or toggling on) previews the sound.
+    var cueEnabled: Bool { get set }
+    var cueTheme: String { get set }            // "tick" | "chime" | "soft" | "drop" | "marimba"
 
     // ----- Sub-bridge for the Model tab -----
     var modelManager: ModelManagerBridge? { get }
@@ -115,6 +119,8 @@ public extension SettingsBridge {
     var historyEnabled: Bool { get { true } set {} }
     var launchAtLogin: Bool { get { false } set {} }
     var clipboardOverwrite: Bool { get { false } set {} }
+    var cueEnabled: Bool { get { true } set {} }
+    var cueTheme: String { get { "chime" } set {} }
     var modelManager: ModelManagerBridge? { nil }
     func selectTier(_ tier: Int) {}
     func micGranted() -> Bool { true }
@@ -187,6 +193,8 @@ public final class SettingsState: ObservableObject {
     @Published public var history = true
     @Published public var launchAtLogin = false
     @Published public var clipOverwrite = false
+    @Published public var cueEnabled = true
+    @Published public var cueTheme = "chime"
 
     /// Host bridge; when set, controls read/write through it.
     public weak var bridge: SettingsBridge?
@@ -207,6 +215,8 @@ public final class SettingsState: ObservableObject {
         self.history = bridge.historyEnabled
         self.launchAtLogin = bridge.launchAtLogin
         self.clipOverwrite = bridge.clipboardOverwrite
+        self.cueEnabled = bridge.cueEnabled
+        self.cueTheme = bridge.cueTheme
     }
 
     // ---- write-throughs (bridge present) or local fallback (preview) -------
@@ -244,6 +254,14 @@ public final class SettingsState: ObservableObject {
     public func applyClipOverwrite(_ on: Bool) {
         clipOverwrite = on
         bridge?.clipboardOverwrite = on
+    }
+    public func applyCueEnabled(_ on: Bool) {
+        cueEnabled = on
+        bridge?.cueEnabled = on
+    }
+    public func applyCueTheme(_ t: String) {
+        cueTheme = t
+        bridge?.cueTheme = t
     }
     public func applyTier(_ tier: Int) {
         latency = tier
@@ -632,6 +650,23 @@ private struct DictationTab: View {
             }
             SettingsRow(title: l10n.t("dict.history"), help: l10n.t("dict.history.help")) {
                 VibeToggle(on: Binding(get: { s.history }, set: { s.applyHistory($0) }))
+            }
+            // Typeless-style cue sound on dictation start/stop (default on) + timbre.
+            SettingsRow(title: l10n.t("dict.cue"), help: l10n.t("dict.cue.help")) {
+                VibeToggle(on: Binding(get: { s.cueEnabled }, set: { s.applyCueEnabled($0) }))
+            }
+            if s.cueEnabled {
+                SettingsRow(title: l10n.t("dict.cueTheme"), help: l10n.t("dict.cueTheme.help")) {
+                    VibeSelect(value: Binding(get: { s.cueTheme }, set: { _ in }),
+                               options: [
+                                   ("tick",    l10n.t("cue.tick")),
+                                   ("chime",   l10n.t("cue.chime")),
+                                   ("soft",    l10n.t("cue.soft")),
+                                   ("drop",    l10n.t("cue.drop")),
+                                   ("marimba", l10n.t("cue.marimba")),
+                               ],
+                               onChange: { s.applyCueTheme($0) })
+                }
             }
         }
     }

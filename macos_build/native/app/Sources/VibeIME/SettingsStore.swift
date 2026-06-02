@@ -51,6 +51,8 @@ final class SettingsStore: L10nPersistence {
         static let insertMethod = "insertMethod"
         static let clipboardOverwrite = "clipboardOverwrite"
         static let launchAtLogin = "launchAtLogin"
+        static let cueEnabled = "cueEnabled"
+        static let cueTheme = "cueTheme"
     }
 
     private let defaults: UserDefaults
@@ -70,6 +72,8 @@ final class SettingsStore: L10nPersistence {
             Key.insertMethod: "type",   // default to streaming keystroke insertion
             Key.clipboardOverwrite: false,
             Key.launchAtLogin: false,
+            Key.cueEnabled: true,             // Typeless-style cue sound, ON by default
+            Key.cueTheme: "chime",            // default timbre
         ])
     }
 
@@ -178,6 +182,20 @@ final class SettingsStore: L10nPersistence {
     var clipboardOverwrite: Bool {
         get { defaults.bool(forKey: Key.clipboardOverwrite) }
         set { defaults.set(newValue, forKey: Key.clipboardOverwrite); post(SettingsStore.changed) }
+    }
+
+    // MARK: Cue sound (dictation start/stop blip)
+
+    /// Play a Typeless-style cue sound on dictation start/stop. Default ON.
+    var cueEnabled: Bool {
+        get { defaults.bool(forKey: Key.cueEnabled) }
+        set { defaults.set(newValue, forKey: Key.cueEnabled); post(SettingsStore.changed) }
+    }
+
+    /// Cue timbre: "tick" | "chime" | "soft" | "drop" | "marimba".
+    var cueTheme: String {
+        get { defaults.string(forKey: Key.cueTheme) ?? "chime" }
+        set { defaults.set(newValue, forKey: Key.cueTheme); post(SettingsStore.changed) }
     }
 
     // MARK: Launch at login

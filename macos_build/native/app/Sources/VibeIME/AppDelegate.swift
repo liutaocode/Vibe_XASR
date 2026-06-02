@@ -589,6 +589,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         setStatusIcon("🔴")
 
         engine.startSession()
+        if store.cueEnabled { CueSound.shared.play(theme: store.cueTheme, start: true) }
         do {
             try mic.start()
         } catch {
@@ -613,6 +614,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         // Do NOT read a buffer synchronously here — onFinal hasn't run yet (that race
         // was the "shows text but never inserts / history empty" bug).
         engine?.endSession()
+        if store.cueEnabled { CueSound.shared.play(theme: store.cueTheme, start: false) }
         hudModel.phase = .done
         setStatusIcon(engineReady ? "🎙" : "⏳")
         hideHUD(after: 0.8)
@@ -717,6 +719,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         setStatusIcon("📞")
 
         engine.startSession()
+        if store.cueEnabled { CueSound.shared.play(theme: store.cueTheme, start: true) }
         do { try mic.start() }
         catch {
             hudModel.fail(icon: "🎙", title: L10n.shared.t("hud.micFail"),
@@ -743,6 +746,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 self.onCallLog.entries.append(HistoryItem(id: UUID(), text: t, date: Date(), mode: "oncall"))
             }
             engine.endSession()
+            if store.cueEnabled { CueSound.shared.play(theme: store.cueTheme, start: false) }
             engine.onFinal = nil
             engine.holdToTalk = true         // restore push-to-talk default
         }
@@ -995,6 +999,17 @@ extension AppDelegate: SettingsBridge {
     var launchAtLogin: Bool {
         get { store.launchAtLogin }
         set { store.launchAtLogin = newValue }
+    }
+
+    var cueEnabled: Bool {
+        get { store.cueEnabled }
+        // Preview the cue when the user turns it on.
+        set { store.cueEnabled = newValue; if newValue { CueSound.shared.play(theme: store.cueTheme, start: true) } }
+    }
+    var cueTheme: String {
+        get { store.cueTheme }
+        // Preview the chosen timbre immediately on switch.
+        set { store.cueTheme = newValue; if store.cueEnabled { CueSound.shared.play(theme: newValue, start: true) } }
     }
 
     var modelManager: ModelManagerBridge? { downloader }
