@@ -108,7 +108,7 @@ public sealed class DictationEngine : IDisposable
         if (_running) return;
 
         _asr = new StreamingAsr(_paths, SampleRate);
-        _vad = new Vad(_paths, _settings.EffectiveVad, SampleRate);
+        _vad = new Vad(_paths, _paths.ResolveVad(_settings.Vad), SampleRate);
 
         _running = true;
         _worker = new Thread(WorkerLoop) { IsBackground = true, Name = "VibeXASR-DictationWorker" };

@@ -29,9 +29,14 @@
 
     <!-- App version — read at runtime (About tab + WinSparkle update comparison) and used as
          the MSI ProductVersion. Bump for each release; keep in sync with the appcast feed. -->
-    <Version>1.1.4</Version>
-    <FileVersion>1.1.4.0</FileVersion>
-    <AssemblyVersion>1.1.4.0</AssemblyVersion>
+    <!-- Windows tracks the macOS base version (1.1.3) + a Windows patch suffix (.1), labelled
+         "-beta". AssemblyVersion/FileVersion stay numeric (1.1.3.1) for WinSparkle + MSI version
+         comparison; InformationalVersion carries the "-beta" shown on the About page. -->
+    <Version>1.1.3.1-beta</Version>
+    <FileVersion>1.1.3.1</FileVersion>
+    <AssemblyVersion>1.1.3.1</AssemblyVersion>
+    <InformationalVersion>1.1.3.1-beta</InformationalVersion>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
   </PropertyGroup>
 
   <ItemGroup>
@@ -55,6 +60,14 @@
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
       <!-- Keep it a loose file beside the single-file exe (not embedded), so the
            DllImportResolver can load it from AppContext.BaseDirectory. -->
+      <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
+    </None>
+    <!-- FireRedVAD native shim (default VAD). Loose beside the exe; loaded via NativeLoader.
+         Its onnxruntime.dll import resolves to sherpa-onnx's (already loaded by the ASR). -->
+    <None Include="..\..\third_party\firered\firered_vad.dll">
+      <Link>firered_vad.dll</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
       <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
     </None>
   </ItemGroup>

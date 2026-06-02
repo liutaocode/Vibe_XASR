@@ -42,6 +42,12 @@ New-Item -ItemType Directory -Force $tier | Out-Null
 Copy-Item "$repo\dist\$Rid\VibeXASR.exe" (Join-Path $payload "VibeXASR.exe") -Force
 # WinSparkle auto-update DLL - installs beside the exe; loaded from the app dir at runtime.
 Copy-Item "$repo\third_party\winsparkle\WinSparkle.dll" (Join-Path $payload "WinSparkle.dll") -Force
+# FireRedVAD shim (default VAD) + its model (onnx + CMVN), sourced from macos_build (committed there).
+Copy-Item "$repo\third_party\firered\firered_vad.dll" (Join-Path $payload "firered_vad.dll") -Force
+$frm = Join-Path $payload "models\firered"
+New-Item -ItemType Directory -Force $frm | Out-Null
+$frsrc = Join-Path (Split-Path $repo -Parent) "macos_build\models\firered"
+foreach ($f in 'firered_vad.onnx','cmvn_means.bin','cmvn_istd.bin') { Copy-Item (Join-Path $frsrc $f) $frm -Force }
 
 # Default tier from HuggingFace (only the files not already staged). ~615 MB.
 $base = "https://huggingface.co/GilgameshWind/X-ASR-zh-en/resolve/main/deployment/models/chunk-960ms-model"
@@ -59,6 +65,6 @@ if (-not (Test-Path $sv)) {
 # --- 3. build the MSI (Version flows into the WiX Package/@Version) ---
 Write-Host "Building MSI v$Version ..." -ForegroundColor Cyan
 Push-Location $here
-try { & $wix build Product.wxs -ext WixToolset.UI.wixext -d "Version=$Version" -o "VibeXASR-Setup.msi" }
+try { & $wix build Product.wxs -ext WixToolset.UI.wixext -ext WixToolset.Util.wixext -d "Version=$Version" -o "VibeXASR-Setup.msi" }
 finally { Pop-Location }
 Write-Host "Done: $here\VibeXASR-Setup.msi" -ForegroundColor Green

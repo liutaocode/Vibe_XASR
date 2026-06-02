@@ -202,7 +202,7 @@ public sealed class TrayApp : IDisposable, IAppController
         try
         {
             var paths = ModelPaths.ForTier(_settings.Tier);
-            var vad = _settings.EffectiveVad;
+            var vad = paths.ResolveVad(_settings.Vad);   // FireRed if bundled, else Silero
             Diag.Log($"EnsureEngine tier={(int)_settings.Tier} vad={vad} " +
                      $"asr={paths.AsrModelPresent()} vadPresent={paths.VadPresent(vad)}");
             if (!paths.AsrModelPresent() || !paths.VadPresent(vad))
@@ -213,7 +213,9 @@ public sealed class TrayApp : IDisposable, IAppController
                     _dl?.Report(p.Fraction ?? 0,
                         $"{p.FileName}  ({p.FileIndex + 1}/{p.FileCount})"));
                 await dl.EnsureTierAsync(paths, prog);
-                await dl.EnsureVadAsync(paths.VadFileFor(vad), prog);
+                // Silero downloads on demand; FireRed ships bundled (ResolveVad already degraded to
+                // Silero if FireRed was absent), so only Silero can need a fetch here.
+                if (vad == VadKind.Silero) await dl.EnsureVadAsync(paths.VadFileFor(vad), prog);
                 CloseDownloadDialog();
             }
             // Build the engine (565 MB model) OFF the UI thread so the app + hotkey stay

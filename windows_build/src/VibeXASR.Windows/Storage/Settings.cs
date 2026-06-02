@@ -47,15 +47,13 @@ public sealed class Settings
     public ModelTier Tier { get; set; } = ModelTier.Ms960; // 960ms default, matches macOS.
 
     [JsonConverter(typeof(JsonStringEnumConverter))]
-    public VadKind Vad { get; set; } = VadKind.Silero;
+    public VadKind Vad { get; set; } = VadKind.FireRed; // FireRedVAD default, matches macOS
 
-    /// <summary>
-    /// The VAD actually usable on Windows. FireRedVAD on macOS uses a custom onnxruntime shim
-    /// (not sherpa-onnx), which isn't ported to Windows and isn't downloadable — so a persisted
-    /// or selected <see cref="VadKind.FireRed"/> coerces to Silero rather than killing the engine.
-    /// </summary>
+    /// <summary>Back-compat alias. Both Silero and FireRed now work on Windows (the FireRed macOS
+    /// shim is ported as firered_vad.dll); the present-or-fall-back-to-Silero decision lives in
+    /// <see cref="Models.ModelPaths.ResolveVad"/>.</summary>
     [JsonIgnore]
-    public VadKind EffectiveVad => Vad == VadKind.FireRed ? VadKind.Silero : Vad;
+    public VadKind EffectiveVad => Vad;
 
     /// <summary>
     /// Push-to-talk key. Stored as a Win32 virtual-key code (VK_*).

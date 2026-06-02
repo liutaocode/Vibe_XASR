@@ -296,15 +296,18 @@ public sealed class SettingsForm : Form
         }
         col.AddGroup(L10n.T("grp.models"), manage);
 
-        // VAD (de-emphasized).
-        // Only silero is supported on Windows (FireRedVAD is a macOS-only onnxruntime shim).
+        // VAD backend: FireRed (default, native shim — macOS parity) or Silero (sherpa-onnx).
         var vadSel = new VibeSelect
         {
-            Width = 180,
-            Options = new[] { ("silero", L10n.T("model.vad.silero")) },
-            Value = "silero",
+            Width = 200,
+            Options = new[]
+            {
+                ("firered", L10n.T("model.vad.firered")),
+                ("silero",  L10n.T("model.vad.silero")),
+            },
+            Value = S.Vad == VadKind.Silero ? "silero" : "firered",
         };
-        vadSel.SelectionChanged += (_, v) => _app.SetVad(VadKind.Silero);
+        vadSel.SelectionChanged += (_, v) => _app.SetVad(v == "silero" ? VadKind.Silero : VadKind.FireRed);
         col.AddGroup(L10n.T("grp.vad"),
             new List<Control> { Row(L10n.T("model.vad"), L10n.T("model.vad.help"), vadSel) });
     }
@@ -524,8 +527,9 @@ public sealed class SettingsForm : Form
 
         var name = CenterLabel(L10n.T("app.name"), Theme.Ui(17f, FontStyle.Bold), Theme.Text, _innerWidth, y); y += 30;
         card.Controls.Add(name);
-        var vv = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version ?? new Version(1, 0, 0);
-        var ver = CenterLabel(L10n.T("about.version", $"{vv.Major}.{vv.Minor}.{Math.Max(0, vv.Build)}"),
+        // InformationalVersion (e.g. "1.1.3.1-beta"); strip any "+<commit>" build metadata.
+        var disp = Application.ProductVersion; var plus = disp.IndexOf('+'); if (plus >= 0) disp = disp[..plus];
+        var ver = CenterLabel(L10n.T("about.version", disp),
                               Theme.Mono(8.5f), Theme.TextMuted, _innerWidth, y); y += 30;
         card.Controls.Add(ver);
 

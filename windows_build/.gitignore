@@ -18,6 +18,12 @@ tokens.txt
 installer/eddsa_private.key
 *.key
 
+# FireRedVAD native build artifacts. The shipped firered_vad.dll + its sources/headers/build
+# script ARE committed; these (objects, generated import lib, copied onnxruntime.dll) and the
+# model copy (sourced from macos_build at packaging time) are not.
+third_party/firered/build/
+third_party/firered/model/
+
 # IDE / OS cruft
 .vs/
 *.user

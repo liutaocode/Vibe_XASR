@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Vibe XASR Windows auto-update feed (WinSparkle). Separate from appcast.xml (macOS/Sparkle)
-     and versioned INDEPENDENTLY of macOS. Served via GitHub Pages at
+<!-- Vibe XASR Windows auto-update feed (WinSparkle). Separate from appcast.xml (macOS/Sparkle).
+     Windows rides the current macOS release tag; a Windows-only patch carries a .N suffix
+     (e.g. 1.1.3.1) so there is a single "Latest" release. Served via GitHub Pages at
      https://liutaocode.github.io/Vibe_XASR/appcast-win.xml
-     The enclosure MUST be the EdDSA-signed MSI attached to the Windows release. Sign it with
-     third_party/winsparkle/winsparkle-tool.exe (the "sign" subcommand with the private key
-     file), then paste the result into sparkle:edSignature and set length to the MSI byte size. -->
+     Sign the MSI with third_party/winsparkle/winsparkle-tool.exe (the "sign" subcommand with the
+     private key), then paste into sparkle:edSignature and set length to the MSI byte size. -->
 <rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
   <channel>
     <title>Vibe XASR (Windows)</title>
@@ -12,23 +12,24 @@
     <description>Vibe XASR Windows auto-update feed</description>
     <language>zh</language>
     <item>
-      <title>Vibe XASR 1.1.4</title>
-      <pubDate>Mon, 01 Jun 2026 09:10:00 +0800</pubDate>
-      <link>https://github.com/liutaocode/Vibe_XASR/releases/tag/win-v1.1.4</link>
+      <title>Vibe XASR 1.1.3.1-beta</title>
+      <pubDate>Tue, 02 Jun 2026 09:40:00 +0800</pubDate>
+      <link>https://github.com/liutaocode/Vibe_XASR/releases/tag/v1.1.3</link>
       <description><![CDATA[
-        <h3>Vibe XASR 1.1.4 (Windows)</h3>
+        <h3>Vibe XASR 1.1.3.1-beta (Windows)</h3>
         <ul>
-          <li>新增首次使用引导:说明应用在屏幕右下角的系统托盘、基本用法,以及识别引擎的准备状态。</li>
-          <li>托盘提示实时显示引擎「正在准备 / 已就绪」,首次启动加载本地模型时不再静默等待。</li>
+          <li>语音活动检测默认改用 FireRedVAD(与 macOS 同款原生引擎),中文断句更准。</li>
+          <li>新增首次使用引导:说明应用在屏幕右下角系统托盘、基本用法、识别引擎准备状态。</li>
+          <li>安装完成后自动启动应用(进入引导)。</li>
         </ul>
       ]]></description>
       <enclosure
-        url="https://github.com/liutaocode/Vibe_XASR/releases/download/win-v1.1.4/VibeXASR-1.1.4-windows-x64.msi"
+        url="https://github.com/liutaocode/Vibe_XASR/releases/download/v1.1.3/VibeXASR-1.1.3.1-windows-x64.msi"
         sparkle:os="windows"
-        sparkle:version="1.1.4"
-        sparkle:shortVersionString="1.1.4"
-        sparkle:edSignature="AOmRuYNhYHl2gZNSZvgsEK7jJ8u7tazzXZz+AhBeGB+dejwuUP3/lGo5teBzvu8YPMHHA1LtP2yyADGYp02gAQ=="
-        length="625348608"
+        sparkle:version="1.1.3.1"
+        sparkle:shortVersionString="1.1.3.1-beta"
+        sparkle:edSignature="mf0H2X7+1nM5UIZP/T1QIlXyB/9N8eqt/vwV8Y0NS0PDiUgx8z9sND+8k7mnyaNKltBWwCdoo0rJcCZ3TlDDDA=="
+        length="628371456"
         type="application/octet-stream" />
     </item>
   </channel>

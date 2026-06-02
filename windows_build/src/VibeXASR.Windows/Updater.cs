@@ -40,10 +40,12 @@ internal static class Updater
         _onQuit = onQuit;
         try
         {
-            NativeLibrary.SetDllImportResolver(typeof(Updater).Assembly, ResolveDll);
+            NativeLoader.EnsureRegistered();
 
             var v = Assembly.GetExecutingAssembly().GetName().Version ?? new Version(1, 0, 0);
-            string version = $"{v.Major}.{v.Minor}.{Math.Max(0, v.Build)}";
+            // Include the 4th field (revision) so Windows patch suffixes (e.g. 1.1.3.1) compare
+            // correctly against the appcast — WinSparkle does a 4-field version comparison.
+            string version = $"{v.Major}.{v.Minor}.{Math.Max(0, v.Build)}.{Math.Max(0, v.Revision)}";
             string? env = Environment.GetEnvironmentVariable("VIBEXASR_APPCAST");
             string appcast = string.IsNullOrWhiteSpace(env) ? DefaultAppcastUrl : env;
 
@@ -98,20 +100,6 @@ internal static class Updater
             else Application.Exit();
         }
         catch { Environment.Exit(0); }
-    }
-
-    // Load WinSparkle.dll from the app's own directory (next to the single-file exe / install dir).
-    private static IntPtr ResolveDll(string name, Assembly asm, DllImportSearchPath? search)
-    {
-        if (!name.Equals(Dll, StringComparison.OrdinalIgnoreCase)) return IntPtr.Zero;
-        foreach (var dir in new[] { AppContext.BaseDirectory,
-                                    Path.GetDirectoryName(Environment.ProcessPath ?? "") })
-        {
-            if (string.IsNullOrEmpty(dir)) continue;
-            var p = Path.Combine(dir, "WinSparkle.dll");
-            if (File.Exists(p) && NativeLibrary.TryLoad(p, out var h)) return h;
-        }
-        return NativeLibrary.TryLoad("WinSparkle.dll", out var h2) ? h2 : IntPtr.Zero;
     }
 
     // ---- P/Invoke (WinSparkle, all __cdecl) ----
