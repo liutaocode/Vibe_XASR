@@ -6,7 +6,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 MODE="${1:-release}"
-ID="Developer ID Application: Your Name (TEAMID)"
+ID="${SIGN_ID:-Developer ID Application: Your Name (TEAMID)}"
 APP="native/dist/Vibe XASR.app"
 ENT="native/app/Resources/VibeIME.entitlements"
 PROFILE="vibeime"
