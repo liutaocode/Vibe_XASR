@@ -8,10 +8,12 @@ installer/payload/
 installer/*.msi
 installer/*.wixpdb
 
-# Models are fetched from HuggingFace, never committed
-models/
+# ASR model payload is fetched from HuggingFace / staged at build time, never committed.
+# (payload/ + dist/ above already cover the model dirs. Do NOT add a bare `models/` rule —
+#  it also matches the C# source dir src/VibeXASR.Windows/Models/ and would drop ModelPaths.cs.)
 *.onnx
 tokens.txt
+bpe.vocab
 
 # EdDSA auto-update SIGNING KEY — secret, never commit. Back this up safely:
 # losing it means you can't sign future updates; leaking it lets others sign malicious ones.
