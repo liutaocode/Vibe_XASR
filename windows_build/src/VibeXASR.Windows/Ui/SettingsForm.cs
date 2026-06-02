@@ -48,6 +48,13 @@ public sealed class SettingsForm : Form
     private const int DictPageSize = 5;
     private const int DictMaxWords = 100, DictMaxRules = 100;
 
+    // 口令 (voice snippets) tab — draft survives internal rebuilds; reset on a real tab switch.
+    private sealed class SnipRow { public string Trigger = ""; public string Text = ""; }
+    private List<SnipRow> _snipDraft = new();
+    private bool _snipLoaded;
+    private Label? _snipCountLabel;
+    private const int DictMaxSnippets = 100;
+
     private static readonly ModelTier[] Tiers =
         { ModelTier.Ms160, ModelTier.Ms480, ModelTier.Ms960, ModelTier.Ms1920 };
 
@@ -114,6 +121,7 @@ public sealed class SettingsForm : Form
             ("general", "tab.general", "⚙"),
             ("dictation", "tab.dictation", "🎙"),
             ("dictionary", "tab.dictionary", "📖"),
+            ("snippet", "tab.snippet", "⚡"),
             ("model", "tab.model", "🧠"),
             ("records", "tab.records", "📋"),
             ("permissions", "tab.permissions", "🔐"),
@@ -149,7 +157,7 @@ public sealed class SettingsForm : Form
 
     private void Select(string tab)
     {
-        if (tab != _tab) _dictLoaded = false;   // discard unsaved 词典 draft on a real tab change
+        if (tab != _tab) { _dictLoaded = false; _snipLoaded = false; }   // discard unsaved 词典/口令 drafts on a real tab change
         _tab = tab;
         foreach (var b in _tabButtons) b.Selected = b.Id == tab;
         RebuildCurrentTab();
@@ -179,6 +187,7 @@ public sealed class SettingsForm : Form
                 case "general": BuildGeneral(col); break;
                 case "dictation": BuildDictation(col); break;
                 case "dictionary": BuildDictionary(col); break;
+                case "snippet": BuildSnippets(col); break;
                 case "model": BuildModel(col); _modelTimer.Start(); break;
                 case "records": BuildRecords(); break;
                 case "permissions": BuildPermissions(col); break;
@@ -241,6 +250,10 @@ public sealed class SettingsForm : Form
                 Toggle(S.ClipboardOverwrite, v => _app.SetClipboardOverwrite(v))),
             Row(L10n.T("dict.history"), L10n.T("dict.history.help"),
                 Toggle(S.HistoryEnabled, v => _app.SetHistoryEnabled(v))),
+            Row(L10n.T("dict.itn"), L10n.T("dict.itn.help"),
+                Toggle(S.ItnEnabled, v => _app.SetItn(v))),
+            Row(L10n.T("dict.defiller"), L10n.T("dict.defiller.help"),
+                Toggle(S.DefillerEnabled, v => _app.SetDefiller(v))),
         };
         col.AddGroup(L10n.T("grp.dictation"), rows);
     }
@@ -821,6 +834,132 @@ public sealed class SettingsForm : Form
 
     private static string TierForScore(double s) => s < 4 ? "low" : (s < 6 ? "mid" : "high");
     private static double ScoreForTier(string t) => t == "low" ? 3.0 : (t == "high" ? 7.0 : 5.0);
+
+    // ---- 口令 (voice snippets): spoken trigger → saved (multi-line) expansion ----
+    // Port of the macOS SnippetTab: one card per snippet (trigger field + ⊖ over a multi-line
+    // expansion editor). Draft commits on "Save & apply" → SetSnippets re-parses; the enable toggle
+    // applies live against the last-SAVED JSON. Stored as [{"t":trigger,"x":text}].
+
+    private void BuildSnippets(Column col)
+    {
+        if (!_snipLoaded) { _snipDraft = ParseSnips(S.SnippetsJson); _snipLoaded = true; }
+        bool on = S.SnippetsEnabled;
+        col.AddGroup(L10n.T("grp.snippet"), new List<Control>
+        {
+            Row(L10n.T("snip.enable"), L10n.T("snip.enable.help"),
+                Toggle(on, v => { _app.SetSnippets(v, S.SnippetsJson); RebuildCurrentTab(); })),
+            SnipEditor(on),
+            SnipSaveRow(on),
+        });
+    }
+
+    private Control SnipEditor(bool enabled)
+    {
+        int w = _innerWidth;
+        var host = new Panel { BackColor = Theme.Surface, Width = w };
+        int y = 13;
+        host.Controls.Add(EditorTitle(L10n.T("snip.editor.title"), y, w)); y += 20;
+        int hh = MeasureWrapped(L10n.T("snip.editor.help"), Theme.Ui(9f), w - 32);
+        host.Controls.Add(EditorHelp(L10n.T("snip.editor.help"), y, w, hh)); y += hh + 9;
+
+        if (_snipDraft.Count == 0)
+        {
+            host.Controls.Add(EmptyHint(L10n.T("snip.empty"), y, w)); y += 30;
+        }
+        else
+        {
+            for (int i = 0; i < _snipDraft.Count; i++)
+            {
+                int idx = i;
+                var card = new RoundedPanel
+                {
+                    Fill = Theme.Surface2, Border = Theme.Hairline, Radius = Theme.RadiusControl,
+                    Location = new Point(16, y), Size = new Size(w - 32, 100),
+                };
+                var trig = new TextBox
+                {
+                    Font = Theme.Mono(10f), BackColor = Theme.Surface, ForeColor = Theme.Text,
+                    BorderStyle = BorderStyle.FixedSingle, Location = new Point(10, 9), Size = new Size(w - 32 - 10 - 40, 24),
+                    Text = _snipDraft[idx].Trigger, PlaceholderText = L10n.T("snip.trigger.ph"), Enabled = enabled,
+                };
+                trig.TextChanged += (_, _) => { if (idx < _snipDraft.Count) { _snipDraft[idx].Trigger = trig.Text; UpdateSnipCount(); } };
+                var exp = new TextBox
+                {
+                    Multiline = true, ScrollBars = ScrollBars.Vertical, WordWrap = true,
+                    Font = Theme.Mono(10f), BackColor = Theme.Surface, ForeColor = Theme.Text,
+                    BorderStyle = BorderStyle.FixedSingle, Location = new Point(10, 40), Size = new Size(w - 32 - 20, 50),
+                    Text = (_snipDraft[idx].Text ?? "").Replace("\r\n", "\n").Replace("\n", "\r\n"),
+                    PlaceholderText = L10n.T("snip.text.ph"), Enabled = enabled,
+                };
+                exp.TextChanged += (_, _) => { if (idx < _snipDraft.Count) _snipDraft[idx].Text = exp.Text; };
+                card.Controls.Add(trig);
+                card.Controls.Add(DeleteButton(w - 32 - 38, 8, enabled, () => { if (idx < _snipDraft.Count) { _snipDraft.RemoveAt(idx); RebuildCurrentTab(); } }));
+                card.Controls.Add(exp);
+                host.Controls.Add(card);
+                y += 108;
+            }
+        }
+
+        bool canAdd = enabled && _snipDraft.Count < DictMaxSnippets;
+        var add = new VibeButton
+        {
+            Text = _snipDraft.Count >= DictMaxSnippets ? L10n.T("hw.full") : "+  " + L10n.T("snip.add"),
+            Style = VibeButton.Kind.Ghost, Size = new Size(150, 30), Location = new Point(16, y + 4), Enabled = canAdd,
+        };
+        add.Click += (_, _) => { if (_snipDraft.Count < DictMaxSnippets) { _snipDraft.Add(new SnipRow()); RebuildCurrentTab(); } };
+        host.Controls.Add(add); y += 42;
+
+        host.Height = y;
+        return host;
+    }
+
+    private Control SnipSaveRow(bool enabled)
+    {
+        int w = _innerWidth;
+        var host = new Panel { BackColor = Theme.Surface, Width = w, Height = 50 };
+        _snipCountLabel = new Label { Text = L10n.T("snip.count", CountSnips(_snipDraft)), Font = Theme.Mono(9.5f), ForeColor = Theme.TextMuted, AutoSize = true, Location = new Point(16, 17), BackColor = Color.Transparent };
+        var saved = new Label { Text = L10n.T("hw.saved"), Font = Theme.Ui(9.5f), ForeColor = Theme.Success, AutoSize = true, Visible = false, BackColor = Color.Transparent };
+        var save = new VibeButton { Text = L10n.T("hw.save"), Style = VibeButton.Kind.Solid, Size = new Size(128, 32), Location = new Point(w - 128 - 16, 9), Enabled = enabled };
+        save.Click += (_, _) =>
+        {
+            _app.SetSnippets(S.SnippetsEnabled, SerializeSnips(_snipDraft));
+            saved.Location = new Point(save.Left - saved.PreferredWidth - 12, 17);
+            Flash(saved);
+        };
+        host.Controls.Add(_snipCountLabel); host.Controls.Add(saved); host.Controls.Add(save);
+        return host;
+    }
+
+    private void UpdateSnipCount() { if (_snipCountLabel is { IsDisposed: false }) _snipCountLabel.Text = L10n.T("snip.count", CountSnips(_snipDraft)); }
+    private static int CountSnips(List<SnipRow> rows) => rows.Count(r => !string.IsNullOrWhiteSpace(r.Trigger));
+
+    private static List<SnipRow> ParseSnips(string? json)
+    {
+        var list = new List<SnipRow>();
+        if (string.IsNullOrWhiteSpace(json)) return list;
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(json);
+            if (doc.RootElement.ValueKind != System.Text.Json.JsonValueKind.Array) return list;
+            foreach (var el in doc.RootElement.EnumerateArray())
+            {
+                if (el.ValueKind != System.Text.Json.JsonValueKind.Object) continue;
+                var t = el.TryGetProperty("t", out var tv) ? tv.GetString() : null;
+                var x = el.TryGetProperty("x", out var xv) ? xv.GetString() : null;
+                if (!string.IsNullOrEmpty(t)) list.Add(new SnipRow { Trigger = t, Text = x ?? "" });
+            }
+        }
+        catch { /* malformed JSON → empty list */ }
+        return list;
+    }
+
+    private static string SerializeSnips(List<SnipRow> rows)
+    {
+        var arr = rows.Where(r => !string.IsNullOrWhiteSpace(r.Trigger))
+            .Select(r => new Dictionary<string, string> { ["t"] = r.Trigger.Trim(), ["x"] = (r.Text ?? "").Replace("\r\n", "\n") });
+        return System.Text.Json.JsonSerializer.Serialize(arr,
+            new System.Text.Json.JsonSerializerOptions { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
+    }
 
     // ---- About ----
 

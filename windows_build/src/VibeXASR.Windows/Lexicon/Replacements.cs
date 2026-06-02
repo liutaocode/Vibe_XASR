@@ -51,4 +51,28 @@ public static class Replacements
             return m.Value;
         });
     }
+
+    /// <summary>Snippet expansion (口令): a spoken trigger → (possibly multi-line) saved text.
+    /// Unlike <see cref="Apply"/>: (1) the trigger tolerates whitespace BETWEEN characters, so a
+    /// spelled-out "C C" (this model emits letters spaced) matches a trigger "cc"; (2) it swallows
+    /// one trailing sentence-final mark (。.!?！? but NOT a comma) after the hit, so the expansion
+    /// lands clean instead of inheriting the auto-period the engine appends to a finalized
+    /// utterance. Single left-to-right pass (longest trigger first). Port of macOS Replacements.expand.</summary>
+    public static string Expand(string text, IReadOnlyList<Rule> rules)
+    {
+        if (string.IsNullOrEmpty(text) || rules.Count == 0) return text ?? string.Empty;
+        var sorted = rules.Where(r => r.From.Length > 0).OrderByDescending(r => r.From.Length).ToList();
+        if (sorted.Count == 0) return text;
+        var alts = sorted.Select(r => "(" + string.Join(@"\s*", r.From.Select(c => Regex.Escape(c.ToString()))) + ")");
+        var pattern = "(?:" + string.Join("|", alts) + @")\s*[。.!?！？]?";
+        Regex re;
+        try { re = new Regex(pattern, RegexOptions.IgnoreCase); }
+        catch { return text; }
+        return re.Replace(text, m =>
+        {
+            for (int i = 0; i < sorted.Count; i++)
+                if (m.Groups[i + 1].Success) return sorted[i].To;
+            return m.Value;
+        });
+    }
 }

@@ -33,6 +33,11 @@ public interface IAppController
     void SetReplacements(bool enabled, string text);
     void SetPinyinFuzzy(bool on);
 
+    // ----- v1.3.0 final-text post-processors -----
+    void SetItn(bool on);            // 数字规整 (ITN)
+    void SetDefiller(bool on);       // 去口水词
+    void SetSnippets(bool enabled, string json);   // 口令 (voice snippets)
+
     // ----- permissions (Windows: microphone privacy) -----
     bool MicGranted();
     void OpenMicPrivacy();

@@ -10,6 +10,7 @@ using NAudio.Wave;
 using NAudio.Wave.SampleProviders;
 using VibeXASR.Windows.Dictation;
 using VibeXASR.Windows.Input;
+using System.Text.Json;
 using VibeXASR.Windows.Lexicon;
 using VibeXASR.Windows.Models;
 using VibeXASR.Windows.Storage;
@@ -31,6 +32,7 @@ public sealed class TrayApp : IDisposable, IAppController
     private readonly HistoryStore _history = new();
     private readonly PinyinNormalizer _pinyin = new();                                  // 词典: homophone correction
     private IReadOnlyList<Replacements.Rule> _replaceRules = Array.Empty<Replacements.Rule>(); // 词典: replacements
+    private IReadOnlyList<Replacements.Rule> _snippetRules = Array.Empty<Replacements.Rule>(); // 口令: voice snippets
     private readonly ModelManager _models;
 
     private NotifyIcon? _tray;
@@ -572,13 +574,18 @@ public sealed class TrayApp : IDisposable, IAppController
         RefreshOpenWindows();
     }
 
-    /// <summary>Apply the 词典 post-processors to a final: homophone (pinyin) correction, then text
-    /// replacements. No-ops unless enabled + populated.</summary>
+    /// <summary>Apply the post-processors to a final result, matching the macOS pipeline order:
+    /// pinyin homophone correction → text replacements → 去口水词 → 数字规整 (ITN) → 口令 expansion.
+    /// Each step no-ops unless enabled + populated. Runs on FINAL text only (not streaming partials,
+    /// where ITN digits would jump as you speak).</summary>
     private string ApplyCorrections(string textIn)
     {
         var text = textIn;
         if (_settings.PinyinFuzzyEnabled && _pinyin.IsActive) text = _pinyin.Normalize(text);
         if (_settings.ReplacementsEnabled && _replaceRules.Count > 0) text = Replacements.Apply(text, _replaceRules);
+        if (_settings.DefillerEnabled) text = Defiller.Clean(text);                 // 去口水词: strip fillers first
+        if (_settings.ItnEnabled) text = ChineseITN.Normalize(text);                // 数字规整: then normalize numbers
+        if (_settings.SnippetsEnabled && _snippetRules.Count > 0) text = Replacements.Expand(text, _snippetRules); // 口令: expand last
         return text;
     }
 
@@ -591,9 +598,31 @@ public sealed class TrayApp : IDisposable, IAppController
             _pinyin.LoadTableIfNeeded(ModelPaths.ForTier(_settings.Tier).PinyinTable);
             _pinyin.SetWords(_settings.PinyinFuzzyEnabled ? HotwordsStore.Normalize(_settings.HotwordsText) : new List<string>());
             _replaceRules = _settings.ReplacementsEnabled ? Replacements.Parse(_settings.ReplacementsText) : Array.Empty<Replacements.Rule>();
-            Diag.Log($"corrections: pinyin={_pinyin.IsActive} rules={_replaceRules.Count}");
+            _snippetRules = _settings.SnippetsEnabled ? ParseSnippets(_settings.SnippetsJson) : Array.Empty<Replacements.Rule>();
+            Diag.Log($"corrections: pinyin={_pinyin.IsActive} rules={_replaceRules.Count} snippets={_snippetRules.Count} itn={_settings.ItnEnabled} defiller={_settings.DefillerEnabled}");
         }
         catch (Exception ex) { Diag.Log("RefreshCorrections failed: " + ex.Message); }
+    }
+
+    /// <summary>Parse snippets JSON (<c>[{"t":trigger,"x":text}]</c>) into expansion rules.</summary>
+    private static IReadOnlyList<Replacements.Rule> ParseSnippets(string? json)
+    {
+        var rules = new List<Replacements.Rule>();
+        if (string.IsNullOrWhiteSpace(json)) return rules;
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            if (doc.RootElement.ValueKind != JsonValueKind.Array) return rules;
+            foreach (var el in doc.RootElement.EnumerateArray())
+            {
+                if (el.ValueKind != JsonValueKind.Object) continue;
+                var t = el.TryGetProperty("t", out var tv) ? tv.GetString() : null;
+                var x = el.TryGetProperty("x", out var xv) ? xv.GetString() : null;
+                if (!string.IsNullOrEmpty(t)) rules.Add(new Replacements.Rule(t, x ?? ""));
+            }
+        }
+        catch (Exception ex) { Diag.Log("ParseSnippets failed: " + ex.Message); }
+        return rules;
     }
 
     /// <summary>Hidden 词典 self-test (VIBEXASR_OPEN=dicttest): exercises the hotwords-file writer,
@@ -616,6 +645,20 @@ public sealed class TrayApp : IDisposable, IAppController
             var rules = Replacements.Parse("open claw => OpenClaw\n李牧 => 李沐");
             foreach (var t in new[] { "我用 open claw 框架", "李牧老师", "OPEN CLAW yes" })
                 Diag.Log($"  replace '{t}' -> '{Replacements.Apply(t, rules)}'");
+
+            // 数字规整 (ITN)
+            foreach (var t in new[] { "一百二十三", "二零二四年", "三点半", "百分之二十五", "五千八百块",
+                                      "端口八零八零", "下午三点一刻", "第一个人", "等一下", "一带一路" })
+                Diag.Log($"  itn '{t}' -> '{ChineseITN.Normalize(t)}'");
+
+            // 去口水词 (defiller)
+            foreach (var t in new[] { "嗯这个就是就是我的想法", "那个那个我们看看", "呃我我我觉得", "好好学习" })
+                Diag.Log($"  defiller '{t}' -> '{Defiller.Clean(t)}'");
+
+            // 口令 (snippets): trigger tolerates spaced letters + eats one trailing sentence mark
+            var snips = ParseSnippets("[{\"t\":\"我的邮箱\",\"x\":\"tao@example.com\"},{\"t\":\"cc\",\"x\":\"抄送\"}]");
+            foreach (var t in new[] { "请发到我的邮箱。", "麻烦 C C 一下", "我的邮箱" })
+                Diag.Log($"  snippet '{t}' -> '{Replacements.Expand(t, snips)}'");
             Diag.Log("dicttest done");
         }
         catch (Exception ex) { Diag.Log("dicttest error: " + ex); }
@@ -744,6 +787,26 @@ public sealed class TrayApp : IDisposable, IAppController
         _settings.PinyinFuzzyEnabled = on;
         _settings.Save();
         RefreshCorrections();                   // live; no engine rebuild
+    }
+
+    public void SetItn(bool on)
+    {
+        _settings.ItnEnabled = on;
+        _settings.Save();                       // live; read directly in ApplyCorrections
+    }
+
+    public void SetDefiller(bool on)
+    {
+        _settings.DefillerEnabled = on;
+        _settings.Save();                       // live
+    }
+
+    public void SetSnippets(bool enabled, string json)
+    {
+        _settings.SnippetsEnabled = enabled;
+        _settings.SnippetsJson = json ?? "[]";
+        _settings.Save();
+        RefreshCorrections();                   // re-parse 口令 rules; no engine rebuild
     }
 
     public void SetLaunchAtLogin(bool on)

@@ -12,26 +12,26 @@
     <description>Vibe XASR Windows auto-update feed</description>
     <language>zh</language>
     <item>
-      <title>Vibe XASR 1.2.0.2-beta</title>
-      <pubDate>Tue, 02 Jun 2026 22:34:57 +0800</pubDate>
-      <link>https://github.com/liutaocode/Vibe_XASR/releases/tag/v1.2.0</link>
+      <title>Vibe XASR 1.3.0.1-beta</title>
+      <pubDate>Wed, 03 Jun 2026 00:13:26 +0800</pubDate>
+      <link>https://github.com/liutaocode/Vibe_XASR/releases/tag/v1.3.0</link>
       <description><![CDATA[
-        <h3>Vibe XASR 1.2.0.2-beta (Windows)</h3>
+        <h3>Vibe XASR 1.3.0.1-beta (Windows)</h3>
         <ul>
-          <li>「词典」设置页改为分页式行编辑器(与 macOS 新版一致):每个词条 / 替换规则单独一行,
-              可逐条增删,超过 5 条自动分页;强度用低 / 中 / 高分段选择。</li>
-          <li>词典三项功能不变(与 macOS 1.2.0 同步):热词加权、同音字纠正、文本替换。</li>
-          <li>说完插入的悬浮提示更干净:结束时显示「已插入 · N 字」字数统计;识别过程中文字从头部省略,
-              始终显示最新内容。</li>
+          <li>新增「数字规整」:说完时把口语数字转成阿拉伯数字(一百二十三→123、三点半→3:30、
+              百分之二十→20%),成语 / 计数词不动。默认开启。</li>
+          <li>新增「去口水词」:自动去掉「嗯 / 呃 / 唉」和口吃式重复(那个那个→那个),叠词保留。默认开启。</li>
+          <li>新增「口令」标签页:说一个触发词,自动展开成预存文本(邮箱 / 签名 / 样板代码都好用)。</li>
+          <li>(录音设备选择 Windows 早已支持,见「设置 - 权限」。)</li>
         </ul>
       ]]></description>
       <enclosure
-        url="https://github.com/liutaocode/Vibe_XASR/releases/download/v1.2.0/VibeXASR-1.2.0.2-windows-x64.msi"
+        url="https://github.com/liutaocode/Vibe_XASR/releases/download/v1.3.0/VibeXASR-1.3.0.1-windows-x64.msi"
         sparkle:os="windows"
-        sparkle:version="1.2.0.2"
-        sparkle:shortVersionString="1.2.0.2-beta"
-        sparkle:edSignature="QGZOd5eFvJgfsVjVTPq4H8aZtTDHL6WzfZxcyVowyszuU9P0OklMAFjKj3sqVj7iCQ1Zh+dDavhLs6S4C8n8Cw=="
-        length="628551680"
+        sparkle:version="1.3.0.1"
+        sparkle:shortVersionString="1.3.0.1-beta"
+        sparkle:edSignature="3eDrW4co4sc1l0lyvu8/6SjKwssIBCpUGZITMSyW0LSjg4mRMk0WzeFBwhAMMCOOzTHQ3xJVAl5QaTC60u+2AQ=="
+        length="628559872"
         type="application/octet-stream" />
     </item>
   </channel>

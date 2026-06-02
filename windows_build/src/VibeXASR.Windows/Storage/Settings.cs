@@ -109,6 +109,20 @@ public sealed class Settings
     /// <summary>Newline-separated replacement rules, each "from =&gt; to".</summary>
     public string ReplacementsText { get; set; } = "";
 
+    /// <summary>Number normalization (ITN): spoken Chinese numerals → digits on the FINAL result
+    /// (一百二十三→123, 三点半→3:30, 百分之二十→20%). Pure post-processing. On by default.</summary>
+    public bool ItnEnabled { get; set; } = true;
+
+    /// <summary>Remove filler words (嗯/呃/唉 + stutter repeats) from the FINAL result. On by default.</summary>
+    public bool DefillerEnabled { get; set; } = true;
+
+    /// <summary>Master switch for voice snippets (口令: a spoken trigger → a saved expansion).
+    /// On by default (an empty list is a no-op).</summary>
+    public bool SnippetsEnabled { get; set; } = true;
+
+    /// <summary>Snippets as JSON: <c>[{"t":"trigger","x":"expansion"}]</c>. Persisted; parsed live.</summary>
+    public string SnippetsJson { get; set; } = "[]";
+
     // ---- persistence ----
 
     private static readonly JsonSerializerOptions JsonOpts = new()
