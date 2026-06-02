@@ -21,6 +21,8 @@
           <li>「词典」设置页改为分页式行编辑器(与 macOS 新版一致):每个词条 / 替换规则单独一行,
               可逐条增删,超过 5 条自动分页;强度用低 / 中 / 高分段选择。</li>
           <li>词典三项功能不变(与 macOS 1.2.0 同步):热词加权、同音字纠正、文本替换。</li>
+          <li>说完插入的悬浮提示更干净:结束时显示「已插入 · N 字」字数统计;识别过程中文字从头部省略,
+              始终显示最新内容。</li>
         </ul>
       ]]></description>
       <enclosure
@@ -28,8 +30,8 @@
         sparkle:os="windows"
         sparkle:version="1.2.0.2"
         sparkle:shortVersionString="1.2.0.2-beta"
-        sparkle:edSignature="TLB/9PrAh7SK/oItQpy4CPhiXWCLFoQ3Kdiu18bRqCE5wWwA++YV0AE/KP0rjZFcUfH/1LIYSX5iOdreuKMXDQ=="
-        length="628531200"
+        sparkle:edSignature="QGZOd5eFvJgfsVjVTPq4H8aZtTDHL6WzfZxcyVowyszuU9P0OklMAFjKj3sqVj7iCQ1Zh+dDavhLs6S4C8n8Cw=="
+        length="628551680"
         type="application/octet-stream" />
     </item>
   </channel>

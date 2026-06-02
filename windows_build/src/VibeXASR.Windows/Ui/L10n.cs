@@ -213,6 +213,7 @@ public static class L10n
 
         ["hud.listening"] = "Listening…",
         ["hud.inserted"] = "Inserted",
+        ["hud.insertedN"] = "Inserted · {0} chars",
         ["hud.releaseHint"] = "Release to drop · Esc to cancel",
         ["hud.copyAll"] = "Copy all",
         ["hud.stop"] = "Stop",
@@ -377,6 +378,7 @@ public static class L10n
 
         ["hud.listening"] = "在听…",
         ["hud.inserted"] = "已插入",
+        ["hud.insertedN"] = "已插入 · {0} 字",
         ["hud.releaseHint"] = "松开落字 · Esc 取消",
         ["hud.copyAll"] = "复制全文",
         ["hud.stop"] = "停止",
@@ -541,6 +543,7 @@ public static class L10n
 
         ["hud.listening"] = "聞いています…",
         ["hud.inserted"] = "挿入済み",
+        ["hud.insertedN"] = "{0} 文字を挿入",
         ["hud.releaseHint"] = "離すと入力 · Esc で取消",
         ["hud.copyAll"] = "全文をコピー",
         ["hud.stop"] = "停止",
@@ -705,6 +708,7 @@ public static class L10n
 
         ["hud.listening"] = "듣는 중…",
         ["hud.inserted"] = "삽입됨",
+        ["hud.insertedN"] = "{0}자 삽입",
         ["hud.releaseHint"] = "놓으면 입력 · Esc로 취소",
         ["hud.copyAll"] = "전체 복사",
         ["hud.stop"] = "중지",

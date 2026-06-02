@@ -133,8 +133,10 @@ public sealed class TrayApp : IDisposable, IAppController
                 _listening = true;
                 _overlay?.ShowListening();
                 _overlay?.SetLevel(0.7);
-                _overlay?.SetText(openArg == "oncall" ? "" : "把这个 function 改成 async");
+                _overlay?.SetText(openArg == "oncall" ? ""
+                    : "把这个 function 改成 async,顺手把错误处理也补上,再写两句单元测试");
                 if (openArg == "oncall") _overlay?.ShowOnCall();
+                else if (openArg == "inserted") _overlay?.ShowInserted(autoHide: false);
                 break;
         }
     }
@@ -550,12 +552,14 @@ public sealed class TrayApp : IDisposable, IAppController
             case DictationMode.Paste:
                 TextInserter.InsertText(text);
                 MaybeOverwriteClipboard(text);
+                _overlay?.SetText(text);     // so the "已插入 · N 字" count reflects the inserted text
                 _overlay?.ShowInserted();
                 break;
             case DictationMode.Type:
                 StreamTypeDiff(text);
                 _typedSoFar = string.Empty;
                 MaybeOverwriteClipboard(text);
+                _overlay?.SetText(text);
                 _overlay?.ShowInserted();
                 break;
             case DictationMode.OnCall:

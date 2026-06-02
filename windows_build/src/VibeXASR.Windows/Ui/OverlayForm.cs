@@ -99,14 +99,21 @@ public sealed class OverlayForm : Form
         ShowNoActivate();
     }
 
-    /// <summary>Briefly show the "Inserted ✓" confirmation, then hide.</summary>
-    public void ShowInserted()
+    /// <summary>Briefly show a compact "已插入 · N 字" confirmation, then hide.
+    /// (autoHide=false keeps it up — used by the VIBEXASR_OPEN=overlay:inserted debug hook.)</summary>
+    public void ShowInserted(bool autoHide = true)
     {
-        if (InvokeRequired) { BeginInvoke(ShowInserted); return; }
+        if (InvokeRequired) { BeginInvoke(() => ShowInserted(autoHide)); return; }
         if (_state == OverlayState.OnCall) return;
         _state = OverlayState.Inserted;
+        // Shrink the pill to fit the confirmation (no truncated text echo) — like macOS fixedSize.
+        int tw = TextRenderer.MeasureText(L10n.T("hud.insertedN", CharCount(_text)), Theme.Ui(11.5f, FontStyle.Bold)).Width;
+        Size = new Size(Math.Max(190, 48 + tw + 22), 56);
+        ApplyRoundedRegion(Height / 2f);
+        PositionBottomCenter();
         Invalidate();
-        var t = new System.Windows.Forms.Timer { Interval = 900 };
+        if (!autoHide) return;
+        var t = new System.Windows.Forms.Timer { Interval = 1100 };
         t.Tick += (_, _) => { t.Stop(); t.Dispose(); HideOverlay(); };
         t.Start();
     }
@@ -176,6 +183,26 @@ public sealed class OverlayForm : Form
         return $"{s / 60}:{s % 60:00}";
     }
 
+    /// <summary>Character count of the inserted text (for the "已插入 · N 字" confirmation).</summary>
+    private static int CharCount(string? s) => string.IsNullOrEmpty(s) ? 0 : s.Trim().Length;
+
+    /// <summary>Truncate from the HEAD with a leading "…" so the NEWEST words stay visible as the
+    /// stream grows (GDI has no head-ellipsis flag; macOS uses .truncationMode(.head)).
+    /// Binary-search the smallest tail that still fits in <paramref name="maxW"/>.</summary>
+    private static string ClipHead(string s, Font f, int maxW)
+    {
+        if (string.IsNullOrEmpty(s) || maxW <= 0) return s ?? string.Empty;
+        if (TextRenderer.MeasureText(s, f).Width <= maxW) return s;
+        int lo = 1, hi = s.Length - 1, best = s.Length - 1;
+        while (lo <= hi)
+        {
+            int mid = (lo + hi) / 2;
+            if (TextRenderer.MeasureText("…" + s.Substring(mid), f).Width <= maxW) { best = mid; hi = mid - 1; }
+            else lo = mid + 1;
+        }
+        return "…" + s.Substring(best);
+    }
+
     // ---- paint ----
 
     protected override void OnPaint(PaintEventArgs e)
@@ -192,38 +219,43 @@ public sealed class OverlayForm : Form
         var r = new RectangleF(0.75f, 0.75f, Width - 1.5f, Height - 1.5f);
         float rad = Height / 2f;
         Draw.FillRounded(g, r, rad, bg);
-        // A soft glowing edge — accent while listening, green when inserted — gives the pill
-        // a "designed" look instead of a flat rectangle.
+        // Soft glowing edge — accent while listening, green when inserted.
         var edge = done ? Theme.Success : Theme.AccentA;
         Draw.StrokeRounded(g, r, rad, Color.FromArgb(70, edge), 3f);
         Draw.StrokeRounded(g, r, rad, Color.FromArgb(done ? 200 : 150, edge), 1.4f);
 
-        // Left cluster: waveform behind a glowing accent orb.
-        var center = new PointF(40, Height / 2f);
-        if (_state == OverlayState.Listening) PaintWaveform(g, new RectangleF(20, Height / 2f - 13, 40, 26));
-        PaintOrb(g, center, 13, done);
+        // Inserted: a clean compact confirmation — green ✓ orb + "已插入 · N 字" (no truncated echo).
+        if (done)
+        {
+            PaintOrb(g, new PointF(28, Height / 2f), 12, true);
+            TextRenderer.DrawText(g, L10n.T("hud.insertedN", CharCount(_text)),
+                Theme.Ui(11.5f, FontStyle.Bold), new Rectangle(48, 0, Width - 48 - 14, Height),
+                Theme.Success, TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+            return;
+        }
 
-        // Right status: timer pill while listening, "Inserted ✓" when done.
-        Font rf = done ? Theme.Ui(10f, FontStyle.Bold) : Theme.Mono(9.5f);
-        string right = done ? "✓ " + L10n.T("hud.inserted") : Elapsed();
+        // Listening: center-weighted waveform behind a glowing accent orb.
+        if (_state == OverlayState.Listening) PaintWaveform(g, new RectangleF(20, Height / 2f - 13, 40, 26));
+        PaintOrb(g, new PointF(40, Height / 2f), 13, false);
+
+        // Right: elapsed-timer pill.
+        var rf = Theme.Mono(9.5f);
+        string right = Elapsed();
         var rsz = TextRenderer.MeasureText(right, rf);
         int rightX = Width - rsz.Width - 20;
-        if (!done)
-            Draw.FillRounded(g, new RectangleF(rightX - 9, Height / 2f - 11, rsz.Width + 18, 22), 11, Theme.Surface2);
-        TextRenderer.DrawText(g, right, rf, new Rectangle(rightX, 0, rsz.Width, Height),
-            done ? Theme.Success : Theme.TextMuted,
+        Draw.FillRounded(g, new RectangleF(rightX - 9, Height / 2f - 11, rsz.Width + 18, 22), 11, Theme.Surface2);
+        TextRenderer.DrawText(g, right, rf, new Rectangle(rightX, 0, rsz.Width, Height), Theme.TextMuted,
             TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
 
-        // Middle: streaming mono text + caret; while empty, prompt the user what to do.
+        // Middle: streaming text. Empty → prompt; else the line truncated from the HEAD so the
+        // NEWEST words stay visible (matches macOS .truncationMode(.head)), with a blinking caret.
         int midX = 70, midW = rightX - 16 - midX;
         var mf = Theme.Mono(11.5f);
-        bool placeholder = _text.Length == 0 && !done;
-        if (placeholder)
+        if (_text.Length == 0)
         {
             bool zh = L10n.Resolved == Lang.Zh;
-            TextRenderer.DrawText(g, L10n.T("hud.listening"), Theme.Mono(11.5f),
-                new Rectangle(midX, 0, midW, Height), Theme.Text,
-                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+            TextRenderer.DrawText(g, L10n.T("hud.listening"), mf, new Rectangle(midX, 0, midW, Height),
+                Theme.Text, TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
             int lw = TextRenderer.MeasureText(L10n.T("hud.listening"), mf).Width;
             TextRenderer.DrawText(g, zh ? "松开落字" : "release to insert", Theme.Ui(9f),
                 new Rectangle(midX + lw + 10, 0, midW - lw - 10, Height), Theme.TextMuted,
@@ -231,16 +263,13 @@ public sealed class OverlayForm : Form
         }
         else
         {
-            string shown = _text;
+            string shown = ClipHead(_text, mf, midW - 14);
+            int tw = Math.Min(midW, TextRenderer.MeasureText(shown, mf).Width);
             TextRenderer.DrawText(g, shown, mf, new Rectangle(midX, 0, midW, Height), Theme.Text,
-                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding |
-                TextFormatFlags.WordEllipsis);
-            if (!done && _blinkTick % 16 < 8)
-            {
-                int tw = Math.Min(midW, TextRenderer.MeasureText(shown, mf).Width);
+                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+            if (_blinkTick % 16 < 8)
                 TextRenderer.DrawText(g, "▌", mf, new Rectangle(midX + tw, 0, 16, Height), Theme.AccentB,
                     TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
-            }
         }
     }
 
