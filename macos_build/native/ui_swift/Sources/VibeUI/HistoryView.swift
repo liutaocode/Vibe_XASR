@@ -248,6 +248,7 @@ public struct HistoryView<Store: HistoryBridge & ObservableObject>: View {
                     }
                 }
             }
+            .frame(maxWidth: .infinity)
             .background(Vibe.Palette.hairline(scheme))
         }
         .background(Vibe.Palette.surface(scheme))
@@ -338,6 +339,10 @@ public struct HistoryView<Store: HistoryBridge & ObservableObject>: View {
                 }
         }
         .padding(.vertical, 11).padding(.horizontal, 16)
+        // Fill the row to the full list width — inside a ScrollView's LazyVStack a
+        // row otherwise shrinks to its content's ideal width, leaving the text
+        // crammed against the left with empty space on the right.
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(Vibe.Palette.surface(scheme))
         .contentShape(Rectangle())
         .onHover { inside in
