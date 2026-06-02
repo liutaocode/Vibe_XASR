@@ -1,2 +1,12 @@
-tools/
+# macOS / editor / local config
+.DS_Store
+.claude/
+
+# build artifacts & caches
+.build/
+*.dSYM/
+*.tar.bz2
 macos_build/native/dist/
+
+# local-only eval tools (not shipped)
+tools/
