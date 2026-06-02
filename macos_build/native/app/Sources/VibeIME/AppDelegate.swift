@@ -52,6 +52,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private let pad = PadStore.shared
     /// Parsed post-recognition correction rules (refreshed on settings change).
     private var replacementRules: [Replacements.Rule] = []
+    /// Parsed snippet expansions (trigger → text), reusing the replacement engine.
+    private var snippetRules: [Replacements.Rule] = []
     private let downloader = ModelDownloader.shared
 
     // MARK: Engine
@@ -605,13 +607,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// dictionary words. Empty when disabled → corrected() is a no-op.
     private func refreshCorrections() {
         replacementRules = store.replacementsEnabled ? Replacements.parse(store.replacementsText) : []
+        snippetRules = store.snippetsEnabled ? AppDelegate.parseSnippets(store.snippetsJSON) : []
         PinyinNormalizer.shared.setWords(store.pinyinFuzzyEnabled ? HotwordsStore.normalize(store.hotwordsText) : [])
     }
-    /// Apply post-recognition corrections to recognized text: first pinyin homophone
-    /// normalization (toward dictionary words), then literal replacement rules.
-    private func corrected(_ t: String) -> String {
+
+    /// Parse the snippets JSON ([{"t":trigger,"x":text}]) into replacement rules.
+    static func parseSnippets(_ json: String) -> [Replacements.Rule] {
+        guard let data = json.data(using: .utf8),
+              let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: String]] else { return [] }
+        return arr.compactMap { d in
+            guard let t = d["t"], !t.isEmpty, let x = d["x"] else { return nil }
+            return Replacements.Rule(from: t, to: x)
+        }
+    }
+    /// Apply post-recognition corrections to recognized text: pinyin homophone
+    /// normalization → literal replacement rules → (final only) number ITN.
+    /// `isFinal` gates ITN, which must NOT run on streaming partials (digits would
+    /// jump as you speak); pinyin/replacements are idempotent and run on both.
+    private func corrected(_ t: String, isFinal: Bool = true) -> String {
         var s = PinyinNormalizer.shared.normalize(t)
         if !replacementRules.isEmpty { s = Replacements.apply(s, replacementRules) }
+        if isFinal {
+            if store.defillerEnabled { s = Defiller.clean(s) }   // strip fillers first
+            if store.itnEnabled { s = ChineseITN.normalize(s) }  // then normalize numbers
+            if !snippetRules.isEmpty { s = Replacements.expand(s, snippetRules) }  // expand snippets last (space-tolerant trigger, eats trailing 。)
+        }
         return s
     }
 
@@ -623,7 +643,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         engine.onPartial = { [weak self] text in
             DispatchQueue.main.async {
                 guard let self else { return }
-                let text = self.corrected(text)
+                let text = self.corrected(text, isFinal: false)
                 self.hudModel.partialText = text
                 self.hudModel.phase = .speaking
                 // Streaming insertion: type the recognized text into the focused app
@@ -664,6 +684,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         engine.startSession()
         if store.cueEnabled { CueSound.shared.play(theme: store.cueTheme, start: true) }
         do {
+            mic.preferredDeviceUID = store.inputDeviceUID
             try mic.start()
         } catch {
             stopElapsedTimer()
@@ -763,7 +784,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         engine.onPartial = { [weak self] text in
             DispatchQueue.main.async {
                 guard let self, self.onCallActive else { return }
-                let text = self.corrected(text)
+                let text = self.corrected(text, isFinal: false)
                 self.hudModel.partialText = text
                 self.hudModel.phase = .speaking
             }
@@ -795,7 +816,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
         engine.startSession()
         if store.cueEnabled { CueSound.shared.play(theme: store.cueTheme, start: true) }
-        do { try mic.start() }
+        do { mic.preferredDeviceUID = store.inputDeviceUID; try mic.start() }
         catch {
             hudModel.fail(icon: "🎙", title: L10n.shared.t("hud.micFail"),
                           reason: "\(error.localizedDescription)")
@@ -947,6 +968,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
         engine.startSession()
         do {
+            mic.preferredDeviceUID = store.inputDeviceUID
             try mic.start()
         } catch {
             inTry = false
@@ -1129,6 +1151,35 @@ extension AppDelegate: SettingsBridge {
     var pinyinFuzzyEnabled: Bool {
         get { store.pinyinFuzzyEnabled }
         set { store.pinyinFuzzyEnabled = newValue; refreshCorrections() }
+    }
+    // Number normalization (ITN) — pure post-processing, read live in corrected()
+    var itnEnabled: Bool {
+        get { store.itnEnabled }
+        set { store.itnEnabled = newValue }
+    }
+    // Filler-word removal — pure post-processing, read live in corrected()
+    var defillerEnabled: Bool {
+        get { store.defillerEnabled }
+        set { store.defillerEnabled = newValue }
+    }
+    // Voice snippets (trigger → multi-line expansion)
+    var snippetsEnabled: Bool {
+        get { store.snippetsEnabled }
+        set { store.snippetsEnabled = newValue; refreshCorrections() }
+    }
+    var snippetsJSON: String {
+        get { store.snippetsJSON }
+        set { store.snippetsJSON = newValue }   // persist only; applySnippets() commits
+    }
+    func applySnippets() { store.commitSnippets(); refreshCorrections() }
+
+    // Microphone input-device picker
+    func inputDevices() -> [(uid: String, name: String)] {
+        [("", L10n.shared.t("perm.device.default"))] + AudioDevices.inputs().map { ($0.uid, $0.name) }
+    }
+    var inputDeviceUID: String {
+        get { store.inputDeviceUID }
+        set { store.inputDeviceUID = newValue }
     }
 
     var modelManager: ModelManagerBridge? { downloader }

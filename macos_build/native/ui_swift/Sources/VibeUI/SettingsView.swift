@@ -54,12 +54,21 @@ public protocol SettingsBridge: AnyObject {
     func applyHotwords()
     /// Homophone (pinyin) correction toward dictionary words. Applied live.
     var pinyinFuzzyEnabled: Bool { get set }
+    /// Number normalization (ITN) on final text (一百二十三→123). Applied live.
+    var itnEnabled: Bool { get set }
+    /// Filler-word removal (嗯/呃/repeats) on final text. Applied live.
+    var defillerEnabled: Bool { get set }
 
     // ----- Replacements (post-recognition corrections) -----
     var replacementsEnabled: Bool { get set }
     var replacementsText: String { get set }    // newline-separated "from => to" (persist only)
     /// Commit the edited rules (applied live; no engine rebuild).
     func applyReplacements()
+
+    // ----- Voice snippets (trigger → multi-line expansion) -----
+    var snippetsEnabled: Bool { get set }
+    var snippetsJSON: String { get set }         // [{"t":trigger,"x":text}] (persist only)
+    func applySnippets()
 
     // ----- Sub-bridge for the Model tab -----
     var modelManager: ModelManagerBridge? { get }
@@ -72,6 +81,11 @@ public protocol SettingsBridge: AnyObject {
     func accessibilityGranted() -> Bool
     func inputMonitoringGranted() -> Bool
     func openPermissionSettings(_ which: PermissionKind)
+
+    // ----- Microphone input device -----
+    /// Available input devices; first entry is the "system default" (uid "").
+    func inputDevices() -> [(uid: String, name: String)]
+    var inputDeviceUID: String { get set }
 
     // ----- Auto-update (Sparkle, implemented in the app target) -----
     /// User-initiated update check. The host drives Sparkle's updater UI
@@ -143,15 +157,22 @@ public extension SettingsBridge {
     var hotwordsScore: Double { get { 5.0 } set {} }
     func applyHotwords() {}
     var pinyinFuzzyEnabled: Bool { get { true } set {} }
+    var itnEnabled: Bool { get { true } set {} }
+    var defillerEnabled: Bool { get { true } set {} }
     var replacementsEnabled: Bool { get { false } set {} }
     var replacementsText: String { get { "" } set {} }
     func applyReplacements() {}
+    var snippetsEnabled: Bool { get { true } set {} }
+    var snippetsJSON: String { get { "[]" } set {} }
+    func applySnippets() {}
     var modelManager: ModelManagerBridge? { nil }
     func selectTier(_ tier: Int) {}
     func micGranted() -> Bool { true }
     func accessibilityGranted() -> Bool { false }
     func inputMonitoringGranted() -> Bool { false }
     func openPermissionSettings(_ which: PermissionKind) {}
+    func inputDevices() -> [(uid: String, name: String)] { [] }
+    var inputDeviceUID: String { get { "" } set {} }
 }
 
 // MARK: - Model-manager observation relay (issue #13 fix)
@@ -221,12 +242,17 @@ public final class SettingsState: ObservableObject {
     @Published public var cueEnabled = true
     @Published public var cueTheme = "chime"
     @Published public var cueVolume = "low"
+    @Published public var inputDeviceUID = ""
     @Published public var hotwordsEnabled = false
     @Published public var hotwordsText = ""
     @Published public var hotwordsScore: Double = 5.0
     @Published public var pinyinFuzzy = true
+    @Published public var itn = true
+    @Published public var defiller = true
     @Published public var replacementsEnabled = false
     @Published public var replacementsText = ""
+    @Published public var snippetsEnabled = true
+    @Published public var snippetsJSON = "[]"
 
     /// Host bridge; when set, controls read/write through it.
     public weak var bridge: SettingsBridge?
@@ -250,12 +276,17 @@ public final class SettingsState: ObservableObject {
         self.cueEnabled = bridge.cueEnabled
         self.cueTheme = bridge.cueTheme
         self.cueVolume = bridge.cueVolume
+        self.inputDeviceUID = bridge.inputDeviceUID
         self.hotwordsEnabled = bridge.hotwordsEnabled
         self.hotwordsText = bridge.hotwordsText
         self.hotwordsScore = bridge.hotwordsScore
         self.pinyinFuzzy = bridge.pinyinFuzzyEnabled
+        self.itn = bridge.itnEnabled
+        self.defiller = bridge.defillerEnabled
         self.replacementsEnabled = bridge.replacementsEnabled
         self.replacementsText = bridge.replacementsText
+        self.snippetsEnabled = bridge.snippetsEnabled
+        self.snippetsJSON = bridge.snippetsJSON
     }
 
     // ---- write-throughs (bridge present) or local fallback (preview) -------
@@ -322,6 +353,19 @@ public final class SettingsState: ObservableObject {
         pinyinFuzzy = on
         bridge?.pinyinFuzzyEnabled = on
     }
+    public func applyItn(_ on: Bool) {
+        itn = on
+        bridge?.itnEnabled = on
+    }
+    public func applyDefiller(_ on: Bool) {
+        defiller = on
+        bridge?.defillerEnabled = on
+    }
+    public func inputDevices() -> [(uid: String, name: String)] { bridge?.inputDevices() ?? [] }
+    public func applyInputDevice(_ uid: String) {
+        inputDeviceUID = uid
+        bridge?.inputDeviceUID = uid
+    }
     public func applyReplacementsEnabled(_ on: Bool) {
         replacementsEnabled = on
         bridge?.replacementsEnabled = on
@@ -330,6 +374,15 @@ public final class SettingsState: ObservableObject {
         replacementsText = text
         bridge?.replacementsText = text
         bridge?.applyReplacements()
+    }
+    public func applySnippetsEnabled(_ on: Bool) {
+        snippetsEnabled = on
+        bridge?.snippetsEnabled = on
+    }
+    public func applySnippets(json: String) {
+        snippetsJSON = json
+        bridge?.snippetsJSON = json
+        bridge?.applySnippets()
     }
     public func applyTier(_ tier: Int) {
         latency = tier
@@ -719,6 +772,12 @@ private struct DictationTab: View {
             SettingsRow(title: l10n.t("dict.history"), help: l10n.t("dict.history.help")) {
                 VibeToggle(on: Binding(get: { s.history }, set: { s.applyHistory($0) }))
             }
+            SettingsRow(title: l10n.t("dict.itn"), help: l10n.t("dict.itn.help")) {
+                VibeToggle(on: Binding(get: { s.itn }, set: { s.applyItn($0) }))
+            }
+            SettingsRow(title: l10n.t("dict.defiller"), help: l10n.t("dict.defiller.help")) {
+                VibeToggle(on: Binding(get: { s.defiller }, set: { s.applyDefiller($0) }))
+            }
             // Typeless-style cue sound on dictation start/stop (default on) + timbre.
             SettingsRow(title: l10n.t("dict.cue"), help: l10n.t("dict.cue.help")) {
                 VibeToggle(on: Binding(get: { s.cueEnabled }, set: { s.applyCueEnabled($0) }))
@@ -1058,6 +1117,170 @@ private struct HotwordsTab: View {
         }
         .padding(.vertical, 13).padding(.horizontal, 16)
         .background(Vibe.Palette.surface(scheme))
+    }
+}
+
+// ---- Snippet tab (voice phrase → expansion) -------------------------------
+
+/// One snippet: a trigger phrase that expands into (possibly multi-line) text.
+struct SnippetRow: Identifiable {
+    var id = UUID()
+    var trigger: String = ""
+    var text: String = ""
+}
+
+/// (口令 / Snippets) Say a trigger, get a saved block of text — e.g. "我的邮箱"
+/// → your address, "许可证头" → a license header. Reuses the replacement engine
+/// (trigger → text), edited as a local draft, committed on "Save & apply".
+private struct SnippetTab: View {
+    @ObservedObject var s: SettingsState
+    @ObservedObject var l10n: L10n
+    @Environment(\.colorScheme) private var scheme
+    @State private var rows: [SnippetRow] = []
+    @State private var loaded = false
+    @State private var saved = false
+
+    static func parse(_ json: String) -> [SnippetRow] {
+        guard let data = json.data(using: .utf8),
+              let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: String]] else { return [] }
+        return arr.compactMap { d in d["t"].map { SnippetRow(trigger: $0, text: d["x"] ?? "") } }
+    }
+    static func serialize(_ rows: [SnippetRow]) -> String {
+        let arr = rows.filter { !$0.trigger.isEmpty }.map { ["t": $0.trigger, "x": $0.text] }
+        guard let data = try? JSONSerialization.data(withJSONObject: arr),
+              let str = String(data: data, encoding: .utf8) else { return "[]" }
+        return str
+    }
+    private var count: Int { rows.filter { !$0.trigger.isEmpty }.count }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            SettingsGroup(label: l10n.t("grp.snippet")) {
+                SettingsRow(title: l10n.t("snip.enable"), help: l10n.t("snip.enable.help")) {
+                    VibeToggle(on: Binding(get: { s.snippetsEnabled },
+                                           set: { s.applySnippetsEnabled($0) }))
+                }
+                editor
+                saveRow
+            }
+        }
+        .onAppear { if !loaded { rows = SnippetTab.parse(s.snippetsJSON); loaded = true } }
+    }
+
+    private var editor: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(l10n.t("snip.editor.title"))
+                    .font(Vibe.Fonts.ui(13.5, weight: .medium))
+                    .foregroundStyle(Vibe.Palette.text(scheme))
+                Text(l10n.t("snip.editor.help"))
+                    .font(Vibe.Fonts.ui(11.5))
+                    .foregroundStyle(Vibe.Palette.textMuted(scheme))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.top, 13).padding(.bottom, 8).padding(.horizontal, 16)
+
+            VStack(spacing: 10) {
+                if rows.isEmpty {
+                    Text(l10n.t("snip.empty"))
+                        .font(Vibe.Fonts.mono(11.5))
+                        .foregroundStyle(Vibe.Palette.textMuted(scheme))
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding(.vertical, 12)
+                } else {
+                    ForEach($rows) { $row in
+                        SnippetCard(row: $row, l10n: l10n) { rows.removeAll { $0.id == row.id } }
+                    }
+                }
+            }
+            .padding(.horizontal, 16)
+            .disabled(!s.snippetsEnabled)
+            .opacity(s.snippetsEnabled ? 1 : 0.5)
+
+            Button { rows.append(SnippetRow()) } label: {
+                Label(l10n.t("snip.add"), systemImage: "plus.circle")
+                    .font(Vibe.Fonts.ui(12.5))
+                    .foregroundStyle(s.snippetsEnabled ? Vibe.Palette.accentA : Vibe.Palette.textMuted(scheme))
+            }
+            .buttonStyle(.plain)
+            .disabled(!s.snippetsEnabled)
+            .padding(.horizontal, 16).padding(.top, 9).padding(.bottom, 6)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Vibe.Palette.surface(scheme))
+    }
+
+    private var saveRow: some View {
+        HStack(spacing: 12) {
+            Text(String(format: l10n.t("snip.count"), count))
+                .font(Vibe.Fonts.mono(11.5))
+                .foregroundStyle(Vibe.Palette.textMuted(scheme))
+            Spacer(minLength: 8)
+            if saved {
+                Text(l10n.t("hw.saved"))
+                    .font(Vibe.Fonts.ui(12, weight: .medium))
+                    .foregroundStyle(Vibe.Palette.success)
+            }
+            MButton(title: l10n.t("hw.save"), kind: .solid) {
+                s.applySnippets(json: SnippetTab.serialize(rows))
+                withAnimation { saved = true }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) { withAnimation { saved = false } }
+            }
+            .disabled(!s.snippetsEnabled)
+        }
+        .padding(.vertical, 13).padding(.horizontal, 16)
+        .background(Vibe.Palette.surface(scheme))
+    }
+}
+
+/// One snippet card: [trigger field] [⊖] over a multi-line expansion editor.
+private struct SnippetCard: View {
+    @Environment(\.colorScheme) private var scheme
+    @Binding var row: SnippetRow
+    @ObservedObject var l10n: L10n
+    var onDelete: () -> Void
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                ZStack(alignment: .leading) {
+                    if row.trigger.isEmpty {
+                        Text(l10n.t("snip.trigger.ph")).font(Vibe.Fonts.mono(12))
+                            .foregroundStyle(Vibe.Palette.textMuted(scheme))
+                            .padding(.horizontal, 10).allowsHitTesting(false)
+                    }
+                    TextField("", text: $row.trigger)
+                        .font(Vibe.Fonts.mono(12)).foregroundStyle(Vibe.Palette.text(scheme))
+                        .textFieldStyle(.plain).padding(.vertical, 7).padding(.horizontal, 10)
+                }
+                .background(RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(Vibe.Palette.surface(scheme))
+                    .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .strokeBorder(Vibe.Palette.hairline(scheme), lineWidth: 1)))
+                .frame(maxWidth: .infinity)
+                Button(action: onDelete) {
+                    Image(systemName: "minus.circle.fill").font(.system(size: 17))
+                        .foregroundStyle(Vibe.Palette.error.opacity(0.85))
+                }.buttonStyle(.plain).frame(width: 28)
+            }
+            ZStack(alignment: .topLeading) {
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(Vibe.Palette.surface(scheme))
+                    .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .strokeBorder(Vibe.Palette.hairline(scheme), lineWidth: 1))
+                if row.text.isEmpty {
+                    Text(l10n.t("snip.text.ph")).font(Vibe.Fonts.mono(11.5))
+                        .foregroundStyle(Vibe.Palette.textMuted(scheme))
+                        .padding(.horizontal, 12).padding(.vertical, 10).allowsHitTesting(false)
+                }
+                TextEditor(text: $row.text)
+                    .font(Vibe.Fonts.mono(12)).foregroundStyle(Vibe.Palette.text(scheme))
+                    .scrollContentBackground(.hidden)
+                    .padding(.horizontal, 8).padding(.vertical, 6).frame(height: 64)
+            }
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Vibe.Palette.surface2(scheme)))
     }
 }
 
@@ -1549,6 +1772,11 @@ private struct PermissionsTab: View {
         SettingsGroup(label: l10n.t("grp.permissions")) {
             Banner(ok: allOk, l10n: l10n)
             PermRow(l10n: l10n, key: "perm.mic", granted: mic) { s.openPermission(.microphone) }
+            SettingsRow(title: l10n.t("perm.device"), help: l10n.t("perm.device.help")) {
+                VibeSelect(value: Binding(get: { s.inputDeviceUID }, set: { _ in }),
+                           options: s.inputDevices().map { ($0.uid, $0.name) },
+                           onChange: { s.applyInputDevice($0) })
+            }
             PermRow(l10n: l10n, key: "perm.a11y", granted: a11y) { s.openPermission(.accessibility) }
             PermRow(l10n: l10n, key: "perm.input", granted: input) { s.openPermission(.inputMonitoring) }
             HStack {
@@ -1873,6 +2101,7 @@ public struct SettingsView: View {
          ("dictation", l10n.t("tab.dictation"), "🎙"),
          ("model", l10n.t("tab.model"), "🧠"),
          ("hotwords", l10n.t("tab.hotwords"), "📖"),
+         ("snippet", l10n.t("tab.snippet"), "⚡"),
          ("records", l10n.t("tab.records"), "📋"),
          ("permissions", l10n.t("tab.permissions"), "🔐"),
          ("about", l10n.t("tab.about"), "ⓘ")]
@@ -1931,6 +2160,7 @@ public struct SettingsView: View {
                     case "model":       ModelTab(s: s, l10n: l10n,
                                                  relay: ModelManagerRelay(manager))
                     case "hotwords":    HotwordsTab(s: s, l10n: l10n)
+                    case "snippet":     SnippetTab(s: s, l10n: l10n)
                     case "permissions": PermissionsTab(s: s, l10n: l10n)
                     default:            AboutTab(l10n: l10n, bridge: bridge)
                     }

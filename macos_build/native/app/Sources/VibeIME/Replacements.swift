@@ -47,4 +47,40 @@ enum Replacements {
         out += ns.substring(from: last)
         return out
     }
+
+    /// Snippet expansion: like `apply`, but tuned for spoken triggers expanding to
+    /// (possibly multi-line) text. Two differences from `apply`:
+    ///   1. the trigger tolerates whitespace BETWEEN characters, so a spelled-out
+    ///      "C C" (this model emits letters spaced) matches a trigger of "cc";
+    ///   2. it swallows one trailing sentence-final mark (。.!?!?) after the hit,
+    ///      so the expansion lands clean instead of inheriting the auto-period
+    ///      `SherpaASR` appends to a finalized utterance. A comma is left intact.
+    /// Single left-to-right pass (longest trigger first) so an expansion is never
+    /// re-matched by a later snippet.
+    static func expand(_ text: String, _ rules: [Rule]) -> String {
+        let sorted = rules.filter { !$0.from.isEmpty }.sorted { $0.from.count > $1.from.count }
+        guard !sorted.isEmpty else { return text }
+        let alts = sorted.map { rule -> String in
+            let core = rule.from.map { NSRegularExpression.escapedPattern(for: String($0)) }
+                .joined(separator: "\\s*")
+            return "(" + core + ")"
+        }
+        let pattern = "(?:" + alts.joined(separator: "|") + ")\\s*[。.!?！？]?"
+        guard let re = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { return text }
+        let ns = text as NSString
+        var out = ""
+        var last = 0
+        re.enumerateMatches(in: text, range: NSRange(location: 0, length: ns.length)) { m, _, _ in
+            guard let m = m else { return }
+            let r = m.range
+            out += ns.substring(with: NSRange(location: last, length: r.location - last))
+            for (i, rule) in sorted.enumerated() where m.range(at: i + 1).location != NSNotFound {
+                out += rule.to
+                break
+            }
+            last = r.location + r.length
+        }
+        out += ns.substring(from: last)
+        return out
+    }
 }

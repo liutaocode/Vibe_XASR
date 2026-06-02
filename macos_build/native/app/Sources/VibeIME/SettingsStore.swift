@@ -60,6 +60,11 @@ final class SettingsStore: L10nPersistence {
         static let replacementsEnabled = "replacementsEnabled"
         static let replacementsText = "replacementsText"
         static let pinyinFuzzyEnabled = "pinyinFuzzyEnabled"
+        static let itnEnabled = "itnEnabled"
+        static let defillerEnabled = "defillerEnabled"
+        static let inputDeviceUID = "inputDeviceUID"
+        static let snippetsEnabled = "snippetsEnabled"
+        static let snippetsJSON = "snippetsJSON"
     }
 
     private let defaults: UserDefaults
@@ -89,6 +94,11 @@ final class SettingsStore: L10nPersistence {
             Key.replacementsEnabled: false,   // post-recognition corrections OFF by default
             Key.replacementsText: "",
             Key.pinyinFuzzyEnabled: true,     // homophone (pinyin) correction ON by default
+            Key.itnEnabled: true,             // number normalization (ITN) ON by default
+            Key.defillerEnabled: true,        // filler-word removal (嗯/呃/repeats) ON by default
+            Key.inputDeviceUID: "",           // "" = system default microphone
+            Key.snippetsEnabled: true,        // voice snippets ON by default (empty list = no-op)
+            Key.snippetsJSON: "[]",
         ])
     }
 
@@ -253,6 +263,42 @@ final class SettingsStore: L10nPersistence {
     var pinyinFuzzyEnabled: Bool {
         get { defaults.bool(forKey: Key.pinyinFuzzyEnabled) }
         set { defaults.set(newValue, forKey: Key.pinyinFuzzyEnabled); post(SettingsStore.changed) }
+    }
+
+    /// Inverse Text Normalization (numbers / dates / percent → 123 / 2024年 / 25%)
+    /// applied to FINAL text. Default ON. Pure post-processing, no engine rebuild.
+    var itnEnabled: Bool {
+        get { defaults.bool(forKey: Key.itnEnabled) }
+        set { defaults.set(newValue, forKey: Key.itnEnabled); post(SettingsStore.changed) }
+    }
+
+    /// Remove filler words (嗯/呃/那个那个/repeats) from FINAL text. Default ON.
+    var defillerEnabled: Bool {
+        get { defaults.bool(forKey: Key.defillerEnabled) }
+        set { defaults.set(newValue, forKey: Key.defillerEnabled); post(SettingsStore.changed) }
+    }
+
+    // MARK: Voice snippets (trigger phrase → multi-line expansion)
+
+    /// Master switch for snippet expansion. Default ON (empty list = no-op).
+    var snippetsEnabled: Bool {
+        get { defaults.bool(forKey: Key.snippetsEnabled) }
+        set { defaults.set(newValue, forKey: Key.snippetsEnabled); post(SettingsStore.changed) }
+    }
+    /// Snippets as JSON: [{"t":"trigger","x":"expansion (may be multi-line)"}].
+    /// Persisted only; applied live via `commitSnippets()`.
+    var snippetsJSON: String {
+        get { defaults.string(forKey: Key.snippetsJSON) ?? "[]" }
+        set { defaults.set(newValue, forKey: Key.snippetsJSON) }
+    }
+    /// Commit edited snippets and refresh the live cache (no engine rebuild).
+    func commitSnippets() { post(SettingsStore.changed) }
+
+    /// Preferred microphone input device UID ("" = system default). Takes effect
+    /// the next time recording starts.
+    var inputDeviceUID: String {
+        get { defaults.string(forKey: Key.inputDeviceUID) ?? "" }
+        set { defaults.set(newValue, forKey: Key.inputDeviceUID); post(SettingsStore.changed) }
     }
 
     // MARK: Replacements (post-recognition corrections)
