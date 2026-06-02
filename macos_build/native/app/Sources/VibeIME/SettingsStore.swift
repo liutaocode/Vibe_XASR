@@ -53,6 +53,13 @@ final class SettingsStore: L10nPersistence {
         static let launchAtLogin = "launchAtLogin"
         static let cueEnabled = "cueEnabled"
         static let cueTheme = "cueTheme"
+        static let cueVolume = "cueVolume"
+        static let hotwordsEnabled = "hotwordsEnabled"
+        static let hotwordsText = "hotwordsText"
+        static let hotwordsScore = "hotwordsScore"
+        static let replacementsEnabled = "replacementsEnabled"
+        static let replacementsText = "replacementsText"
+        static let pinyinFuzzyEnabled = "pinyinFuzzyEnabled"
     }
 
     private let defaults: UserDefaults
@@ -74,6 +81,14 @@ final class SettingsStore: L10nPersistence {
             Key.launchAtLogin: false,
             Key.cueEnabled: true,             // Typeless-style cue sound, ON by default
             Key.cueTheme: "chime",            // default timbre
+            Key.cueVolume: "low",             // cue volume: low (default) | med | high
+            Key.hotwordsEnabled: false,       // hotword biasing OFF by default (zero regression)
+            // Pre-populated examples: common AI names/terms users can keep or swap out.
+            Key.hotwordsText: "贾扬清\n沈向洋\nPyTorch\nOpenAI\ntransformer\n向量数据库",
+            Key.hotwordsScore: 5.0,           // "mid" boost (CJK; English auto-capped ≤2.5)
+            Key.replacementsEnabled: false,   // post-recognition corrections OFF by default
+            Key.replacementsText: "",
+            Key.pinyinFuzzyEnabled: true,     // homophone (pinyin) correction ON by default
         ])
     }
 
@@ -197,6 +212,65 @@ final class SettingsStore: L10nPersistence {
         get { defaults.string(forKey: Key.cueTheme) ?? "chime" }
         set { defaults.set(newValue, forKey: Key.cueTheme); post(SettingsStore.changed) }
     }
+
+    /// Cue volume preset: "low" (default) | "med" | "high".
+    var cueVolume: String {
+        get { defaults.string(forKey: Key.cueVolume) ?? "low" }
+        set { defaults.set(newValue, forKey: Key.cueVolume); post(SettingsStore.changed) }
+    }
+
+    // MARK: Hotwords (contextual biasing)
+
+    /// Master switch for hotword biasing. Toggling rebuilds the engine.
+    var hotwordsEnabled: Bool {
+        get { defaults.bool(forKey: Key.hotwordsEnabled) }
+        set { defaults.set(newValue, forKey: Key.hotwordsEnabled); post(SettingsStore.engineConfigChanged) }
+    }
+
+    /// Raw hotword list (newline-separated). Persisted only; changes take effect
+    /// via `commitHotwords()` so editing keystrokes don't thrash the engine.
+    var hotwordsText: String {
+        get { defaults.string(forKey: Key.hotwordsText) ?? "" }
+        set { defaults.set(newValue, forKey: Key.hotwordsText) }
+    }
+
+    /// Boost strength (1.5 low / 2.0 mid / 3.0 high). Persisted only; applies via
+    /// `commitHotwords()`.
+    var hotwordsScore: Double {
+        get {
+            let v = defaults.double(forKey: Key.hotwordsScore)
+            return v > 0 ? v : 5.0
+        }
+        set { defaults.set(newValue, forKey: Key.hotwordsScore) }
+    }
+
+    /// Commit the current hotword text + score and rebuild the engine so the new
+    /// list takes effect. Call after editing the list ("Save & apply").
+    func commitHotwords() { post(SettingsStore.engineConfigChanged) }
+
+    /// Homophone correction (pinyin): rewrite same-sounding chars into the
+    /// dictionary word's spelling. Default ON. No engine rebuild needed.
+    var pinyinFuzzyEnabled: Bool {
+        get { defaults.bool(forKey: Key.pinyinFuzzyEnabled) }
+        set { defaults.set(newValue, forKey: Key.pinyinFuzzyEnabled); post(SettingsStore.changed) }
+    }
+
+    // MARK: Replacements (post-recognition corrections)
+
+    /// Master switch for `from => to` text corrections. No engine rebuild needed.
+    var replacementsEnabled: Bool {
+        get { defaults.bool(forKey: Key.replacementsEnabled) }
+        set { defaults.set(newValue, forKey: Key.replacementsEnabled); post(SettingsStore.changed) }
+    }
+    /// Raw rules (newline-separated "from => to"). Persisted only; applied via
+    /// `commitReplacements()`.
+    var replacementsText: String {
+        get { defaults.string(forKey: Key.replacementsText) ?? "" }
+        set { defaults.set(newValue, forKey: Key.replacementsText) }
+    }
+    /// Persist the edited rules and notify (applied live on the next utterance — no
+    /// engine rebuild, since this is pure post-processing).
+    func commitReplacements() { post(SettingsStore.changed) }
 
     // MARK: Launch at login
 

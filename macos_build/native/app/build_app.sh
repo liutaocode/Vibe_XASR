@@ -83,6 +83,17 @@ mkdir -p "$APP/Contents/Resources/asr" "$APP/Contents/Resources/firered"
 cp "$ASR_SRC/encoder-960ms.onnx" "$ASR_SRC/decoder-960ms.onnx" \
    "$ASR_SRC/joiner-960ms.onnx"  "$ASR_SRC/tokens.txt" \
    "$APP/Contents/Resources/asr/"
+# Hotword tokenization needs the (augmented) bpe.vocab. Prefer an official one if
+# the model ships it; otherwise reconstruct it from tokens.txt (English hotwords +
+# CJK bootstrap). If this fails, hotwords degrade gracefully (Chinese still works
+# via the bundled list; English is skipped).
+if [ -f "$ASR_SRC/bpe.vocab" ]; then
+  cp "$ASR_SRC/bpe.vocab" "$APP/Contents/Resources/asr/"
+else
+  python3 "$B/../tools/hotwords_eval/make_bpe_vocab.py" \
+    "$APP/Contents/Resources/asr/tokens.txt" "$APP/Contents/Resources/asr/bpe.vocab" \
+    || echo "   WARN: bpe.vocab generation failed → English hotwords unavailable"
+fi
 cp "$FIRED_SRC/firered_vad.onnx" "$FIRED_SRC/cmvn_means.bin" "$FIRED_SRC/cmvn_istd.bin" \
    "$APP/Contents/Resources/firered/"
 # Optional meta/json + sample (harmless; keeps the dir self-describing).
@@ -94,6 +105,9 @@ done
 SILERO_SRC="$APP_SRC/Resources/silero_vad.onnx"
 [ -f "$SILERO_SRC" ] && cp "$SILERO_SRC" "$APP/Contents/Resources/silero_vad.onnx" || \
   echo "   WARN: silero_vad.onnx not found at $SILERO_SRC (silero VAD will be unavailable)"
+# 汉字拼音表(同音字纠正用)。缺失则该功能自动跳过。
+[ -f "$APP_SRC/Resources/pinyin.txt" ] && cp "$APP_SRC/Resources/pinyin.txt" "$APP/Contents/Resources/pinyin.txt" || \
+  echo "   WARN: pinyin.txt not found (homophone correction will be unavailable)"
 if [ -d "$UI_SRC" ]; then
   cp -R "$UI_SRC" "$APP/Contents/Resources/ui"
 fi

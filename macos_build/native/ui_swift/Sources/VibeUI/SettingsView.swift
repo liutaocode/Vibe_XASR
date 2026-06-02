@@ -44,6 +44,22 @@ public protocol SettingsBridge: AnyObject {
     /// `cueTheme` (or toggling on) previews the sound.
     var cueEnabled: Bool { get set }
     var cueTheme: String { get set }            // "tick" | "chime" | "soft" | "drop" | "marimba"
+    var cueVolume: String { get set }           // "low" | "med" | "high"
+
+    // ----- Hotwords (contextual biasing) -----
+    var hotwordsEnabled: Bool { get set }       // master switch (rebuilds engine)
+    var hotwordsText: String { get set }        // newline-separated list (persist only)
+    var hotwordsScore: Double { get set }       // boost: 1.5 low / 2.0 mid / 3.0 high
+    /// Commit the edited list + score and rebuild the engine so it takes effect.
+    func applyHotwords()
+    /// Homophone (pinyin) correction toward dictionary words. Applied live.
+    var pinyinFuzzyEnabled: Bool { get set }
+
+    // ----- Replacements (post-recognition corrections) -----
+    var replacementsEnabled: Bool { get set }
+    var replacementsText: String { get set }    // newline-separated "from => to" (persist only)
+    /// Commit the edited rules (applied live; no engine rebuild).
+    func applyReplacements()
 
     // ----- Sub-bridge for the Model tab -----
     var modelManager: ModelManagerBridge? { get }
@@ -121,6 +137,15 @@ public extension SettingsBridge {
     var clipboardOverwrite: Bool { get { false } set {} }
     var cueEnabled: Bool { get { true } set {} }
     var cueTheme: String { get { "chime" } set {} }
+    var cueVolume: String { get { "low" } set {} }
+    var hotwordsEnabled: Bool { get { false } set {} }
+    var hotwordsText: String { get { "" } set {} }
+    var hotwordsScore: Double { get { 5.0 } set {} }
+    func applyHotwords() {}
+    var pinyinFuzzyEnabled: Bool { get { true } set {} }
+    var replacementsEnabled: Bool { get { false } set {} }
+    var replacementsText: String { get { "" } set {} }
+    func applyReplacements() {}
     var modelManager: ModelManagerBridge? { nil }
     func selectTier(_ tier: Int) {}
     func micGranted() -> Bool { true }
@@ -195,6 +220,13 @@ public final class SettingsState: ObservableObject {
     @Published public var clipOverwrite = false
     @Published public var cueEnabled = true
     @Published public var cueTheme = "chime"
+    @Published public var cueVolume = "low"
+    @Published public var hotwordsEnabled = false
+    @Published public var hotwordsText = ""
+    @Published public var hotwordsScore: Double = 5.0
+    @Published public var pinyinFuzzy = true
+    @Published public var replacementsEnabled = false
+    @Published public var replacementsText = ""
 
     /// Host bridge; when set, controls read/write through it.
     public weak var bridge: SettingsBridge?
@@ -217,6 +249,13 @@ public final class SettingsState: ObservableObject {
         self.clipOverwrite = bridge.clipboardOverwrite
         self.cueEnabled = bridge.cueEnabled
         self.cueTheme = bridge.cueTheme
+        self.cueVolume = bridge.cueVolume
+        self.hotwordsEnabled = bridge.hotwordsEnabled
+        self.hotwordsText = bridge.hotwordsText
+        self.hotwordsScore = bridge.hotwordsScore
+        self.pinyinFuzzy = bridge.pinyinFuzzyEnabled
+        self.replacementsEnabled = bridge.replacementsEnabled
+        self.replacementsText = bridge.replacementsText
     }
 
     // ---- write-throughs (bridge present) or local fallback (preview) -------
@@ -262,6 +301,35 @@ public final class SettingsState: ObservableObject {
     public func applyCueTheme(_ t: String) {
         cueTheme = t
         bridge?.cueTheme = t
+    }
+    public func applyCueVolume(_ v: String) {
+        cueVolume = v
+        bridge?.cueVolume = v
+    }
+    public func applyHotwordsEnabled(_ on: Bool) {
+        hotwordsEnabled = on
+        bridge?.hotwordsEnabled = on   // rebuilds engine immediately
+    }
+    /// Commit the edited list + boost and rebuild the engine.
+    public func applyHotwords(text: String, score: Double) {
+        hotwordsText = text
+        hotwordsScore = score
+        bridge?.hotwordsText = text
+        bridge?.hotwordsScore = score
+        bridge?.applyHotwords()
+    }
+    public func applyPinyinFuzzy(_ on: Bool) {
+        pinyinFuzzy = on
+        bridge?.pinyinFuzzyEnabled = on
+    }
+    public func applyReplacementsEnabled(_ on: Bool) {
+        replacementsEnabled = on
+        bridge?.replacementsEnabled = on
+    }
+    public func applyReplacements(text: String) {
+        replacementsText = text
+        bridge?.replacementsText = text
+        bridge?.applyReplacements()
     }
     public func applyTier(_ tier: Int) {
         latency = tier
@@ -667,8 +735,428 @@ private struct DictationTab: View {
                                ],
                                onChange: { s.applyCueTheme($0) })
                 }
+                SettingsRow(title: l10n.t("dict.cueVol"), help: l10n.t("dict.cueVol.help")) {
+                    VibeSegmented(value: Binding(get: { s.cueVolume }, set: { _ in }),
+                                  options: [("low", l10n.t("vol.low")),
+                                            ("med", l10n.t("vol.mid")),
+                                            ("high", l10n.t("vol.high"))],
+                                  onChange: { s.applyCueVolume($0) })
+                }
             }
         }
+    }
+}
+
+// ---- Hotwords tab (contextual biasing) ------------------------------------
+
+/// (热词 / Hotwords) Edit a list of words the recognizer should be biased toward.
+/// The list is edited in a local draft and only committed (→ engine rebuild) on
+/// "Save & apply", so typing doesn't thrash the engine. A master switch gates the
+/// whole feature; when off the engine stays on the plain greedy recipe.
+private struct HotwordsTab: View {
+    @ObservedObject var s: SettingsState
+    @ObservedObject var l10n: L10n
+    @Environment(\.colorScheme) private var scheme
+
+    @State private var hwRows: [HotwordRow] = []   // hotword list (table rows)
+    @State private var scoreTier = "mid"   // "low" | "mid" | "high"
+    @State private var loaded = false
+    @State private var savedFlash = false
+    @State private var rRules: [ReplaceRow] = []  // replacement rules (table rows)
+    @State private var rSaved = false
+    @State private var swapping = false
+    @State private var hwPage = 0          // hotword list page
+    @State private var rPage = 0           // replacement list page
+    private let pageSize = 5
+    private let maxWords = 100
+    private let maxRules = 100
+    private let swapPoll = Timer.publish(every: 0.4, on: .main, in: .common).autoconnect()
+
+    /// boost score ↔ preset tier mapping (3 / 5 / 7 — the CJK boost; English is
+    /// auto-capped lower in HotwordsStore since over-boosting English distorts).
+    private static func tier(for score: Double) -> String {
+        if score < 4 { return "low" }
+        if score < 6 { return "mid" }
+        return "high"
+    }
+    private static func score(for tier: String) -> Double {
+        switch tier { case "low": return 3.0; case "high": return 7.0; default: return 5.0 }
+    }
+
+    private func pageCount(_ n: Int) -> Int { max(1, (n + pageSize - 1) / pageSize) }
+
+    /// ‹ 1 / N › pager, shown only when there's more than one page.
+    @ViewBuilder
+    private func pager(_ page: Binding<Int>, count: Int) -> some View {
+        let pc = pageCount(count)
+        if pc > 1 {
+            let p = min(max(page.wrappedValue, 0), pc - 1)
+            HStack(spacing: 18) {
+                Spacer()
+                Button { page.wrappedValue = max(0, p - 1) } label: {
+                    Image(systemName: "chevron.left").font(.system(size: 12, weight: .semibold))
+                }.buttonStyle(.plain).disabled(p == 0).opacity(p == 0 ? 0.3 : 1)
+                Text("\(p + 1) / \(pc)").font(Vibe.Fonts.mono(11)).foregroundStyle(Vibe.Palette.textMuted(scheme))
+                Button { page.wrappedValue = min(pc - 1, p + 1) } label: {
+                    Image(systemName: "chevron.right").font(.system(size: 12, weight: .semibold))
+                }.buttonStyle(.plain).disabled(p >= pc - 1).opacity(p >= pc - 1 ? 0.3 : 1)
+                Spacer()
+            }
+            .foregroundStyle(Vibe.Palette.accentA)
+            .padding(.top, 8).padding(.horizontal, 16)
+        }
+    }
+
+    /// Parse stored newline-separated hotwords into table rows.
+    static func parseHWRows(_ text: String) -> [HotwordRow] {
+        text.split(whereSeparator: \.isNewline).compactMap { raw -> HotwordRow? in
+            let w = raw.trimmingCharacters(in: .whitespaces)
+            return w.isEmpty || w.hasPrefix("#") ? nil : HotwordRow(word: w)
+        }
+    }
+    static func serializeHWRows(_ rows: [HotwordRow]) -> String {
+        rows.filter { !$0.word.isEmpty }.map { $0.word }.joined(separator: "\n")
+    }
+    private var hotwordCount: Int { hwRows.filter { !$0.word.isEmpty }.count }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if swapping { SwitchingBanner(l10n: l10n) }
+
+            SettingsGroup(label: l10n.t("grp.hotwords")) {
+                SettingsRow(title: l10n.t("hw.enable"), help: l10n.t("hw.enable.help")) {
+                    VibeToggle(on: Binding(get: { s.hotwordsEnabled },
+                                           set: { s.applyHotwordsEnabled($0) }))
+                }
+                editor
+                SettingsRow(title: l10n.t("hw.score"), help: l10n.t("hw.score.help")) {
+                    VibeSegmented(value: $scoreTier,
+                                  options: [("low", l10n.t("hw.score.low")),
+                                            ("mid", l10n.t("hw.score.mid")),
+                                            ("high", l10n.t("hw.score.high"))])
+                }
+                SettingsRow(title: l10n.t("hw.pinyin"), help: l10n.t("hw.pinyin.help")) {
+                    VibeToggle(on: Binding(get: { s.pinyinFuzzy },
+                                           set: { s.applyPinyinFuzzy($0) }))
+                }
+                saveRow
+            }
+            SettingsGroup(label: l10n.t("grp.replace")) {
+                SettingsRow(title: l10n.t("rep.enable"), help: l10n.t("rep.enable.help")) {
+                    VibeToggle(on: Binding(get: { s.replacementsEnabled },
+                                           set: { s.applyReplacementsEnabled($0) }))
+                }
+                replaceEditor
+                replaceSaveRow
+            }
+        }
+        .onAppear {
+            if !loaded {
+                hwRows = HotwordsTab.parseHWRows(s.hotwordsText)
+                scoreTier = Self.tier(for: s.hotwordsScore)
+                rRules = HotwordsTab.parseRows(s.replacementsText)
+                loaded = true
+            }
+            swapping = s.engineSwapping
+        }
+        .onReceive(swapPoll) { _ in
+            let now = s.engineSwapping
+            if now != swapping { withAnimation(Vibe.Motion.easeOut) { swapping = now } }
+        }
+    }
+
+    /// Single-column table: one hotword per row, add/delete.
+    private var editor: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(l10n.t("hw.editor.title"))
+                    .font(Vibe.Fonts.ui(13.5, weight: .medium))
+                    .foregroundStyle(Vibe.Palette.text(scheme))
+                Text(l10n.t("hw.editor.help"))
+                    .font(Vibe.Fonts.ui(11.5))
+                    .foregroundStyle(Vibe.Palette.textMuted(scheme))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.top, 13).padding(.bottom, 8).padding(.horizontal, 16)
+
+            VStack(spacing: 5) {
+                if hwRows.isEmpty {
+                    Text(l10n.t("hw.empty.hint"))
+                        .font(Vibe.Fonts.mono(11.5))
+                        .foregroundStyle(Vibe.Palette.textMuted(scheme))
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding(.vertical, 12)
+                } else {
+                    let pi = min(hwPage, pageCount(hwRows.count) - 1)
+                    let lo = pi * pageSize
+                    let hi = min(lo + pageSize, hwRows.count)
+                    ForEach(Array(lo..<hi), id: \.self) { i in
+                        HotwordRuleRow(row: $hwRows[i]) {
+                            hwRows.remove(at: i)
+                            hwPage = min(hwPage, pageCount(hwRows.count) - 1)
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 16)
+            .disabled(!s.hotwordsEnabled)
+            .opacity(s.hotwordsEnabled ? 1 : 0.5)
+
+            pager($hwPage, count: hwRows.count)
+
+            Button {
+                guard hwRows.count < maxWords else { return }
+                hwRows.append(HotwordRow())
+                hwPage = pageCount(hwRows.count) - 1
+            } label: {
+                Label(hwRows.count >= maxWords ? l10n.t("hw.full") : l10n.t("hw.add"), systemImage: "plus.circle")
+                    .font(Vibe.Fonts.ui(12.5))
+                    .foregroundStyle((s.hotwordsEnabled && hwRows.count < maxWords) ? Vibe.Palette.accentA : Vibe.Palette.textMuted(scheme))
+            }
+            .buttonStyle(.plain)
+            .disabled(!s.hotwordsEnabled || hwRows.count >= maxWords)
+            .padding(.horizontal, 16).padding(.top, 9).padding(.bottom, 6)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Vibe.Palette.surface(scheme))
+    }
+
+    private var saveRow: some View {
+        HStack(spacing: 12) {
+            Text(String(format: l10n.t("hw.count"), hotwordCount))
+                .font(Vibe.Fonts.mono(11.5))
+                .foregroundStyle(Vibe.Palette.textMuted(scheme))
+            Spacer(minLength: 8)
+            if savedFlash {
+                Text(l10n.t("hw.saved"))
+                    .font(Vibe.Fonts.ui(12, weight: .medium))
+                    .foregroundStyle(Vibe.Palette.success)
+            }
+            MButton(title: l10n.t("hw.save"), kind: .solid) {
+                s.applyHotwords(text: Self.serializeHWRows(hwRows), score: Self.score(for: scoreTier))
+                withAnimation { savedFlash = true }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) {
+                    withAnimation { savedFlash = false }
+                }
+            }
+            .disabled(!s.hotwordsEnabled)
+        }
+        .padding(.vertical, 13).padding(.horizontal, 16)
+        .background(Vibe.Palette.surface(scheme))
+    }
+
+    /// Parse stored "from => to" text into table rows.
+    static func parseRows(_ text: String) -> [ReplaceRow] {
+        text.split(whereSeparator: \.isNewline).compactMap { raw -> ReplaceRow? in
+            let line = raw.trimmingCharacters(in: .whitespaces)
+            guard !line.isEmpty, !line.hasPrefix("#") else { return nil }
+            guard let sep = line.range(of: "=>") ?? line.range(of: "->") else { return nil }
+            let from = String(line[..<sep.lowerBound]).trimmingCharacters(in: .whitespaces)
+            let to   = String(line[sep.upperBound...]).trimmingCharacters(in: .whitespaces)
+            guard !from.isEmpty else { return nil }
+            return ReplaceRow(from: from, to: to)
+        }
+    }
+    /// Serialize table rows back to "from => to" storage format.
+    static func serializeRows(_ rows: [ReplaceRow]) -> String {
+        rows.filter { !$0.from.isEmpty }.map { "\($0.from) => \($0.to)" }.joined(separator: "\n")
+    }
+    private var ruleCount: Int { rRules.filter { !$0.from.isEmpty }.count }
+
+    /// Two-column table editor (from → to), one row per rule.
+    private var replaceEditor: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // Section title + help
+            VStack(alignment: .leading, spacing: 3) {
+                Text(l10n.t("rep.editor.title"))
+                    .font(Vibe.Fonts.ui(13.5, weight: .medium))
+                    .foregroundStyle(Vibe.Palette.text(scheme))
+                Text(l10n.t("rep.editor.help"))
+                    .font(Vibe.Fonts.ui(11.5))
+                    .foregroundStyle(Vibe.Palette.textMuted(scheme))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.top, 13).padding(.bottom, 8).padding(.horizontal, 16)
+
+            // Column headers
+            HStack(spacing: 8) {
+                Text(l10n.t("rep.col.from")).frame(maxWidth: .infinity, alignment: .leading)
+                Spacer().frame(width: 22)
+                Text(l10n.t("rep.col.to")).frame(maxWidth: .infinity, alignment: .leading)
+                Spacer().frame(width: 28)
+            }
+            .font(Vibe.Fonts.mono(10))
+            .foregroundStyle(Vibe.Palette.textMuted(scheme))
+            .padding(.horizontal, 16)
+            .padding(.bottom, 5)
+
+            // Rule rows
+            VStack(spacing: 5) {
+                if rRules.isEmpty {
+                    Text(l10n.t("rep.empty.hint"))
+                        .font(Vibe.Fonts.mono(11.5))
+                        .foregroundStyle(Vibe.Palette.textMuted(scheme))
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding(.vertical, 12)
+                } else {
+                    let pi = min(rPage, pageCount(rRules.count) - 1)
+                    let lo = pi * pageSize
+                    let hi = min(lo + pageSize, rRules.count)
+                    ForEach(Array(lo..<hi), id: \.self) { i in
+                        ReplaceRuleRow(row: $rRules[i]) {
+                            rRules.remove(at: i)
+                            rPage = min(rPage, pageCount(rRules.count) - 1)
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 16)
+            .disabled(!s.replacementsEnabled)
+            .opacity(s.replacementsEnabled ? 1 : 0.5)
+
+            pager($rPage, count: rRules.count)
+
+            // Add rule button
+            Button {
+                guard rRules.count < maxRules else { return }
+                rRules.append(ReplaceRow())
+                rPage = pageCount(rRules.count) - 1
+            } label: {
+                Label(rRules.count >= maxRules ? l10n.t("hw.full") : l10n.t("rep.add"), systemImage: "plus.circle")
+                    .font(Vibe.Fonts.ui(12.5))
+                    .foregroundStyle((s.replacementsEnabled && rRules.count < maxRules) ? Vibe.Palette.accentA : Vibe.Palette.textMuted(scheme))
+            }
+            .buttonStyle(.plain)
+            .disabled(!s.replacementsEnabled || rRules.count >= maxRules)
+            .padding(.horizontal, 16).padding(.top, 9).padding(.bottom, 6)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Vibe.Palette.surface(scheme))
+    }
+
+    private var replaceSaveRow: some View {
+        HStack(spacing: 12) {
+            Text(String(format: l10n.t("rep.count"), ruleCount))
+                .font(Vibe.Fonts.mono(11.5))
+                .foregroundStyle(Vibe.Palette.textMuted(scheme))
+            Spacer(minLength: 8)
+            if rSaved {
+                Text(l10n.t("hw.saved"))
+                    .font(Vibe.Fonts.ui(12, weight: .medium))
+                    .foregroundStyle(Vibe.Palette.success)
+            }
+            MButton(title: l10n.t("hw.save"), kind: .solid) {
+                s.applyReplacements(text: Self.serializeRows(rRules))
+                withAnimation { rSaved = true }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) {
+                    withAnimation { rSaved = false }
+                }
+            }
+            .disabled(!s.replacementsEnabled)
+        }
+        .padding(.vertical, 13).padding(.horizontal, 16)
+        .background(Vibe.Palette.surface(scheme))
+    }
+}
+
+/// Data model for one hotword row.
+struct HotwordRow: Identifiable {
+    var id = UUID()
+    var word: String = ""
+}
+
+/// Single-field row for the hotword list (word + delete button).
+private struct HotwordRuleRow: View {
+    @Environment(\.colorScheme) private var scheme
+    @Binding var row: HotwordRow
+    var onDelete: () -> Void
+    var body: some View {
+        HStack(spacing: 8) {
+            ZStack(alignment: .leading) {
+                if row.word.isEmpty {
+                    Text("e.g. 贾扬清 / PyTorch")
+                        .font(Vibe.Fonts.mono(12))
+                        .foregroundStyle(Vibe.Palette.textMuted(scheme))
+                        .padding(.horizontal, 10)
+                        .allowsHitTesting(false)
+                }
+                TextField("", text: $row.word)
+                    .font(Vibe.Fonts.mono(12))
+                    .foregroundStyle(Vibe.Palette.text(scheme))
+                    .textFieldStyle(.plain)
+                    .padding(.vertical, 7).padding(.horizontal, 10)
+            }
+            .background(
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(Vibe.Palette.surface2(scheme))
+                    .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .strokeBorder(Vibe.Palette.hairline(scheme), lineWidth: 1))
+            )
+            .frame(maxWidth: .infinity)
+            Button(action: onDelete) {
+                Image(systemName: "minus.circle.fill")
+                    .font(.system(size: 17))
+                    .foregroundStyle(Vibe.Palette.error.opacity(0.85))
+            }
+            .buttonStyle(.plain)
+            .frame(width: 28)
+        }
+    }
+}
+
+/// Data model for one replacement rule row (from → to).
+struct ReplaceRow: Identifiable {
+    var id = UUID()
+    var from: String = ""
+    var to: String = ""
+}
+
+/// One row in the replacement table: [from field] → [to field] [delete].
+private struct ReplaceRuleRow: View {
+    @Environment(\.colorScheme) private var scheme
+    @Binding var row: ReplaceRow
+    var onDelete: () -> Void
+    var body: some View {
+        HStack(spacing: 8) {
+            field($row.from, placeholder: "识别出的")
+            Image(systemName: "arrow.right")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(Vibe.Palette.textMuted(scheme))
+                .frame(width: 22)
+            field($row.to, placeholder: "替换为")
+            Button(action: onDelete) {
+                Image(systemName: "minus.circle.fill")
+                    .font(.system(size: 17))
+                    .foregroundStyle(Vibe.Palette.error.opacity(0.85))
+            }
+            .buttonStyle(.plain)
+            .frame(width: 28)
+        }
+    }
+    @ViewBuilder private func field(_ binding: Binding<String>, placeholder: String) -> some View {
+        ZStack(alignment: .leading) {
+            if binding.wrappedValue.isEmpty {
+                Text(placeholder)
+                    .font(Vibe.Fonts.mono(12))
+                    .foregroundStyle(Vibe.Palette.textMuted(scheme))
+                    .padding(.horizontal, 10)
+                    .allowsHitTesting(false)
+            }
+            TextField("", text: binding)
+                .font(Vibe.Fonts.mono(12))
+                .foregroundStyle(Vibe.Palette.text(scheme))
+                .textFieldStyle(.plain)
+                .padding(.vertical, 7).padding(.horizontal, 10)
+        }
+        .background(
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .fill(Vibe.Palette.surface2(scheme))
+                .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .strokeBorder(Vibe.Palette.hairline(scheme), lineWidth: 1))
+        )
+        .frame(maxWidth: .infinity)
     }
 }
 
@@ -1384,6 +1872,7 @@ public struct SettingsView: View {
         [("general", l10n.t("tab.general"), "⚙"),
          ("dictation", l10n.t("tab.dictation"), "🎙"),
          ("model", l10n.t("tab.model"), "🧠"),
+         ("hotwords", l10n.t("tab.hotwords"), "📖"),
          ("records", l10n.t("tab.records"), "📋"),
          ("permissions", l10n.t("tab.permissions"), "🔐"),
          ("about", l10n.t("tab.about"), "ⓘ")]
@@ -1441,6 +1930,7 @@ public struct SettingsView: View {
                     case "dictation":   DictationTab(s: s, l10n: l10n)
                     case "model":       ModelTab(s: s, l10n: l10n,
                                                  relay: ModelManagerRelay(manager))
+                    case "hotwords":    HotwordsTab(s: s, l10n: l10n)
                     case "permissions": PermissionsTab(s: s, l10n: l10n)
                     default:            AboutTab(l10n: l10n, bridge: bridge)
                     }

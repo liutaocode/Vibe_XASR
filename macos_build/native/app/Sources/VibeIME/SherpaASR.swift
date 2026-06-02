@@ -2,22 +2,55 @@ import Foundation
 
 /// Streaming ASR backed by the sherpa-onnx streaming zipformer2 transducer
 /// (wraps `SherpaOnnxRecognizer`). Mirrors the verified native xasr_stream.cc
-/// recipe exactly: model_type "zipformer2", greedy_search, numThreads 2,
-/// provider "cpu", enableEndpoint false; finalize by appending 1.0 s of zeros,
-/// inputFinished, drain, getResult, reset.
+/// recipe exactly: model_type "zipformer2", greedy_search (or
+/// modified_beam_search when hotwords are set), numThreads 2, provider "cpu",
+/// enableEndpoint false; finalize by appending 1.0 s of zeros, inputFinished,
+/// drain, getResult, reset.
 ///
 /// `asrDir` must contain encoder/decoder/joiner-<tier>ms.onnx + tokens.txt.
 /// `tier` is the streaming chunk size in ms ("160"/"480"/"960"/"1920"); the
 /// bundled model is "960". The model files are named with the tier suffix.
+///
+/// Hotwords (contextual biasing): pass `hotwordsFile` (one phrase per line) to
+/// bias decoding toward those words. sherpa only honours hotwords under
+/// `modified_beam_search`, so we switch decoders only when a non-empty file is
+/// present — otherwise the default path stays byte-for-byte the greedy recipe.
+/// English hotwords need the model's BPE vocab (`bpeVocab`, i.e. bpe.vocab) to be
+/// tokenized; Chinese works with cjkchar alone, so a missing vocab degrades to
+/// Chinese-only rather than failing.
 final class SherpaASR: StreamingASR {
     private let recognizer: SherpaOnnxRecognizer
     private let sampleRate = 16000
 
-    init(asrDir: String, tier: String = "960") {
+    init(asrDir: String, tier: String = "960",
+         hotwordsFile: String? = nil, hotwordsScore: Float = 2.0,
+         bpeVocab: String? = nil) {
         let encoder = asrDir + "/encoder-\(tier)ms.onnx"
         let decoder = asrDir + "/decoder-\(tier)ms.onnx"
         let joiner  = asrDir + "/joiner-\(tier)ms.onnx"
         let tokens  = asrDir + "/tokens.txt"
+
+        // Only enable biasing (and thus beam search) when a non-empty hotwords
+        // file actually exists, so users without hotwords keep the exact greedy
+        // recipe (no latency/behaviour change).
+        let fm = FileManager.default
+        let hwFile = hotwordsFile.flatMap { fm.fileExists(atPath: $0) ? $0 : nil }
+        let hasHotwords: Bool = {
+            guard let p = hwFile,
+                  let sz = (try? fm.attributesOfItem(atPath: p))?[.size] as? Int
+            else { return false }
+            return sz > 0
+        }()
+        // This model represents EVERY CJK char as its own ▁-prefixed BPE piece and
+        // has no bare-char tokens, so sherpa's `cjkchar` lookup (bare char) misses
+        // every Chinese hotword. We therefore encode hotwords via the `bpe` unit
+        // with an augmented bpe.vocab (bare CJK chars added for BPE bootstrap), and
+        // HotwordsStore space-separates CJK chars so each maps to its ▁X piece.
+        // Without the vocab, fall back to cjkchar (no biasing on this model, but
+        // harmless). modeling_unit/bpe_vocab only affect hotword encoding, never
+        // the decode path — so this is inert when hotwords are off.
+        let bpe = bpeVocab.flatMap { fm.fileExists(atPath: $0) ? $0 : nil } ?? ""
+        let modelingUnit = (hasHotwords && !bpe.isEmpty) ? "bpe" : "cjkchar"
 
         let transducer = sherpaOnnxOnlineTransducerModelConfig(
             encoder: encoder,
@@ -30,15 +63,19 @@ final class SherpaASR: StreamingASR {
             numThreads: 2,
             provider: "cpu",
             debug: 0,
-            modelType: "zipformer2"
+            modelType: "zipformer2",
+            modelingUnit: modelingUnit,
+            bpeVocab: hasHotwords ? bpe : ""
         )
         let featConfig = sherpaOnnxFeatureConfig(sampleRate: 16000, featureDim: 80)
         var config = sherpaOnnxOnlineRecognizerConfig(
             featConfig: featConfig,
             modelConfig: modelConfig,
             enableEndpoint: false,
-            decodingMethod: "greedy_search",
-            maxActivePaths: 4
+            decodingMethod: hasHotwords ? "modified_beam_search" : "greedy_search",
+            maxActivePaths: 4,
+            hotwordsFile: hasHotwords ? (hwFile ?? "") : "",
+            hotwordsScore: hotwordsScore
         )
         self.recognizer = SherpaOnnxRecognizer(config: &config)
     }

@@ -50,6 +50,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private let store = SettingsStore.shared
     private let history = HistoryStore.shared
     private let pad = PadStore.shared
+    /// Parsed post-recognition correction rules (refreshed on settings change).
+    private var replacementRules: [Replacements.Rule] = []
     private let downloader = ModelDownloader.shared
 
     // MARK: Engine
@@ -94,12 +96,49 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         wireHotkey()
         _ = hotkey.start()
 
+        installEditMenu()      // so ⌘C/⌘V/⌘X/⌘A/⌘Z work in Settings text fields
         observeSettings()
+        CueSound.shared.gain = CueSound.gain(for: store.cueVolume)   // sync cue volume
+        PinyinNormalizer.shared.loadTableIfNeeded(path: ModelPaths.pinyinTablePath())
+        refreshCorrections()   // load replacement rules + pinyin dictionary words
         applyLaunchAtLogin()   // reconcile the login item with the stored pref
 
         if !store.didCompleteOnboarding {
             openOnboarding()
         }
+    }
+
+    /// macOS routes ⌘X/⌘C/⌘V/⌘A/⌘Z to the focused text field via the main menu's
+    /// Edit items' key equivalents. As a menu-bar (accessory) app we have no main
+    /// menu by default, so text fields in Settings couldn't copy/paste/select-all.
+    /// Install a minimal main menu with a standard Edit menu (works even while the
+    /// menu bar itself isn't shown in accessory mode).
+    private func installEditMenu() {
+        let main = NSMenu()
+
+        // App menu placeholder (first item is conventionally the app menu).
+        let appItem = NSMenuItem()
+        main.addItem(appItem)
+        let appMenu = NSMenu()
+        appItem.submenu = appMenu
+        appMenu.addItem(withTitle: L10n.shared.t("menu.quit"),
+                        action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+
+        // Edit menu — the one that makes the clipboard shortcuts work.
+        let editItem = NSMenuItem()
+        main.addItem(editItem)
+        let edit = NSMenu(title: "Edit")
+        editItem.submenu = edit
+        edit.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
+        let redo = edit.addItem(withTitle: "Redo", action: Selector(("redo:")), keyEquivalent: "z")
+        redo.keyEquivalentModifierMask = [.command, .shift]
+        edit.addItem(.separator())
+        edit.addItem(withTitle: "Cut", action: Selector(("cut:")), keyEquivalent: "x")
+        edit.addItem(withTitle: "Copy", action: Selector(("copy:")), keyEquivalent: "c")
+        edit.addItem(withTitle: "Paste", action: Selector(("paste:")), keyEquivalent: "v")
+        edit.addItem(withTitle: "Select All", action: Selector(("selectAll:")), keyEquivalent: "a")
+
+        NSApp.mainMenu = main
     }
 
     /// React to store mutations posted from Settings / onboarding / menu.
@@ -123,7 +162,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
         // When a download finishes, if the just-completed tier is the one the
         // user selected, swap the engine onto it.
-        nc.addObserver(forName: SettingsStore.changed, object: nil, queue: .main) { _ in }
+        nc.addObserver(forName: SettingsStore.changed, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.refreshCorrections() }
+        }
     }
 
     /// Apply the current Dock-icon preference live + keep the menu toggle synced.
@@ -439,8 +480,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let vadDir = ModelPaths.firedDir()
         let sileroPath = ModelPaths.sileroModelPath()
 
+        // Hotwords (contextual biasing): persist the user's list so the recognizer
+        // can load it; resolve the BPE vocab for English terms. When disabled,
+        // remove the file so the engine stays on greedy_search (zero regression).
+        let hwURL = ModelPaths.hotwordsFilePath()
+        if store.hotwordsEnabled {
+            HotwordsStore.writeFile(text: store.hotwordsText, score: store.hotwordsScore, to: hwURL)
+        } else {
+            try? FileManager.default.removeItem(at: hwURL)
+        }
+        let hwFile: String? = (store.hotwordsEnabled && HotwordsStore.isNonEmpty(hwURL)) ? hwURL.path : nil
+        let hwScore = Float(store.hotwordsScore)
+        let bpeVocab = ModelPaths.bpeVocabPath()
+
         FileHandle.standardError.write(
-            "[VibeIME] building engine  vad=\(vadKind) tier=\(resolvedTier) asr=\(asrDir)\n".data(using: .utf8)!)
+            "[VibeIME] building engine  vad=\(vadKind) tier=\(resolvedTier) asr=\(asrDir) hotwords=\(hwFile != nil) bpe=\(bpeVocab != nil)\n".data(using: .utf8)!)
 
         if !announceReady {
             engineSwapping = true
@@ -469,7 +523,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 self?.engineFailed("ASR 模型文件缺失 / ASR model missing", dir: asrDir)
                 return
             }
-            let asr = SherpaASR(asrDir: asrDir, tier: resolvedTier)
+            let asr = SherpaASR(asrDir: asrDir, tier: resolvedTier,
+                                hotwordsFile: hwFile, hotwordsScore: hwScore,
+                                bpeVocab: bpeVocab)
             let engine = DictationEngine(vad: vad, asr: asr, prerollSec: 1.0)
 
             DispatchQueue.main.async {
@@ -544,6 +600,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
     }
 
+    /// Refresh the live post-recognition correction caches (call on launch + on any
+    /// settings change): the literal replacement rules AND the pinyin normalizer's
+    /// dictionary words. Empty when disabled → corrected() is a no-op.
+    private func refreshCorrections() {
+        replacementRules = store.replacementsEnabled ? Replacements.parse(store.replacementsText) : []
+        PinyinNormalizer.shared.setWords(store.pinyinFuzzyEnabled ? HotwordsStore.normalize(store.hotwordsText) : [])
+    }
+    /// Apply post-recognition corrections to recognized text: first pinyin homophone
+    /// normalization (toward dictionary words), then literal replacement rules.
+    private func corrected(_ t: String) -> String {
+        var s = PinyinNormalizer.shared.normalize(t)
+        if !replacementRules.isEmpty { s = Replacements.apply(s, replacementRules) }
+        return s
+    }
+
     private func beginDictation() {
         guard !onboardingActive, !inTry, !onCallActive else { return }
         guard engineReady, let engine else { return }
@@ -552,6 +623,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         engine.onPartial = { [weak self] text in
             DispatchQueue.main.async {
                 guard let self else { return }
+                let text = self.corrected(text)
                 self.hudModel.partialText = text
                 self.hudModel.phase = .speaking
                 // Streaming insertion: type the recognized text into the focused app
@@ -563,6 +635,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         engine.onFinal = { [weak self] text in
             DispatchQueue.main.async {
                 guard let self else { return }
+                let text = self.corrected(text)
                 // Insert + record happen HERE, where `text` is the real final. (The
                 // old code read a buffer synchronously in endDictation before this
                 // async ran → empty text → no insert, no history. That was the bug.)
@@ -690,6 +763,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         engine.onPartial = { [weak self] text in
             DispatchQueue.main.async {
                 guard let self, self.onCallActive else { return }
+                let text = self.corrected(text)
                 self.hudModel.partialText = text
                 self.hudModel.phase = .speaking
             }
@@ -697,6 +771,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         engine.onFinal = { [weak self] text in
             DispatchQueue.main.async {
                 guard let self, self.onCallActive else { return }
+                let text = self.corrected(text)
                 self.history.append(text, mode: "oncall", ephemeral: !self.store.historyEnabled)
                 self.onCallLog.entries.append(HistoryItem(id: UUID(), text: text.trimmingCharacters(in: .whitespacesAndNewlines), date: Date(), mode: "oncall"))
                 self.hudModel.partialText = text
@@ -740,6 +815,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             engine.onPartial = nil
             engine.onFinal = { [weak self] text in
                 guard let self else { return }
+                let text = self.corrected(text)
                 let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !t.isEmpty else { return }
                 self.history.append(text, mode: "oncall", ephemeral: !self.store.historyEnabled)
@@ -1010,6 +1086,49 @@ extension AppDelegate: SettingsBridge {
         get { store.cueTheme }
         // Preview the chosen timbre immediately on switch.
         set { store.cueTheme = newValue; if store.cueEnabled { CueSound.shared.play(theme: newValue, start: true) } }
+    }
+    var cueVolume: String {
+        get { store.cueVolume }
+        // Apply the new gain and preview it at that level.
+        set {
+            store.cueVolume = newValue
+            CueSound.shared.gain = CueSound.gain(for: newValue)
+            if store.cueEnabled { CueSound.shared.play(theme: store.cueTheme, start: true) }
+        }
+    }
+
+    // Hotwords (contextual biasing)
+    var hotwordsEnabled: Bool {
+        get { store.hotwordsEnabled }
+        set { store.hotwordsEnabled = newValue }   // posts engineConfigChanged → rebuild
+    }
+    var hotwordsText: String {
+        get { store.hotwordsText }
+        set { store.hotwordsText = newValue }       // persist only; applyHotwords() rebuilds
+    }
+    var hotwordsScore: Double {
+        get { store.hotwordsScore }
+        set { store.hotwordsScore = newValue }       // persist only
+    }
+    /// Commit the edited list + score and rebuild the engine so it takes effect.
+    func applyHotwords() { store.commitHotwords() }
+
+    // Replacements (post-recognition corrections)
+    var replacementsEnabled: Bool {
+        get { store.replacementsEnabled }
+        set { store.replacementsEnabled = newValue; refreshCorrections() }
+    }
+    var replacementsText: String {
+        get { store.replacementsText }
+        set { store.replacementsText = newValue }   // persist only; applyReplacements() commits
+    }
+    /// Commit edited rules and refresh the live cache (no engine rebuild needed).
+    func applyReplacements() { store.commitReplacements(); refreshCorrections() }
+
+    // Homophone (pinyin) correction
+    var pinyinFuzzyEnabled: Bool {
+        get { store.pinyinFuzzyEnabled }
+        set { store.pinyinFuzzyEnabled = newValue; refreshCorrections() }
     }
 
     var modelManager: ModelManagerBridge? { downloader }

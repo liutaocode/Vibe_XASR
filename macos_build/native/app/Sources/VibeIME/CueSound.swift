@@ -20,6 +20,20 @@ final class CueSound {
     private let sampleRate = 44_100.0
     private var cache: [String: AVAudioPlayer] = [:]
 
+    /// Playback gain (0–1), driven by the user's 低/中/高 preference. Default low
+    /// (the previous fixed level, 0.32, was "a bit loud"). Applied at play time so
+    /// it affects cached players too.
+    var gain: Float = 0.15
+
+    /// Map the low/med/high preset to a playback gain. Default (unknown) = low.
+    static func gain(for preset: String) -> Float {
+        switch preset {
+        case "med":  return 0.35
+        case "high": return 0.65
+        default:     return 0.15   // low (default)
+        }
+    }
+
     /// Play the start (`start == true`) or stop cue for a theme. No-ops on failure.
     func play(theme rawTheme: String, start: Bool) {
         let theme = Theme(rawValue: rawTheme) ?? .chime
@@ -34,13 +48,14 @@ final class CueSound {
             return
         }
         player.currentTime = 0
+        player.volume = gain
         player.play()
     }
 
     private func build(_ theme: Theme, start: Bool) -> AVAudioPlayer? {
         let wav = renderWAV(segments(theme, start: start))
         guard let p = try? AVAudioPlayer(data: wav) else { return nil }
-        p.volume = 0.32
+        p.volume = gain   // refreshed per-play in play(); set here for first play too
         p.prepareToPlay()
         return p
     }

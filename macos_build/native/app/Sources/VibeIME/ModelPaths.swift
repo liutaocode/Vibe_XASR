@@ -43,6 +43,12 @@ enum ModelPaths {
             .appendingPathComponent("chunk-\(tier)ms", isDirectory: true)
     }
 
+    /// Where the user's hotword list is written for the engine to load (one
+    /// phrase per line). Lives in Application Support so it survives app updates.
+    static func hotwordsFilePath() -> URL {
+        appSupportDir().appendingPathComponent("hotwords.txt")
+    }
+
     // MARK: ASR (tier-aware)
 
     /// Bundled ASR directory (encoder/decoder/joiner-960ms.onnx + tokens.txt).
@@ -68,6 +74,15 @@ enum ModelPaths {
         return tierFilesPresent(dir.path, tier: tier) ? dir.path : nil
     }
 
+    /// sentencepiece BPE vocab (bpe.vocab) used to tokenize English hotwords.
+    /// Tier-independent (same tokenizer across chunk sizes), so always resolved
+    /// from the bundled asr dir. Returns nil when absent → English hotwords are
+    /// skipped (Chinese still works via cjkchar).
+    static func bpeVocabPath() -> String? {
+        let p = bundledAsrDir() + "/bpe.vocab"
+        return FileManager.default.fileExists(atPath: p) ? p : nil
+    }
+
     /// FireRedVAD model directory (firered_vad.onnx + cmvn_means/istd.bin).
     static func firedDir() -> String {
         if let res = resourcePath {
@@ -77,6 +92,17 @@ enum ModelPaths {
             }
         }
         return srcFired
+    }
+
+    /// 汉字→拼音 table for homophone correction (bundled at Resources/pinyin.txt).
+    /// Returns nil when absent → the normalizer simply no-ops.
+    static func pinyinTablePath() -> String? {
+        if let res = resourcePath {
+            let p = (res as NSString).appendingPathComponent("pinyin.txt")
+            if FileManager.default.fileExists(atPath: p) { return p }
+        }
+        let dev = "/path/to/xasr_workspace/xasr_macos_build/macos_build/native/app/Resources/pinyin.txt"
+        return FileManager.default.fileExists(atPath: dev) ? dev : nil
     }
 
     /// silero_vad.onnx path (bundled at Resources/silero_vad.onnx; dev fallback
