@@ -96,7 +96,7 @@ public static class L10n
 
         ["settings.title"] = "Preferences",
         ["settings.window.title"] = "Vibe XASR Settings",
-        ["tab.general"] = "General", ["tab.dictation"] = "Dictation", ["tab.model"] = "Model",
+        ["tab.general"] = "General", ["tab.dictation"] = "Dictation", ["tab.dictionary"] = "Dictionary", ["tab.model"] = "Model",
         ["tab.records"] = "Records",
         ["tab.permissions"] = "Permissions", ["tab.about"] = "About",
         ["records.empty"] = "No records yet",
@@ -236,7 +236,7 @@ public static class L10n
 
         ["settings.title"] = "偏好设置",
         ["settings.window.title"] = "Vibe XASR 设置",
-        ["tab.general"] = "通用", ["tab.dictation"] = "听写", ["tab.model"] = "模型",
+        ["tab.general"] = "通用", ["tab.dictation"] = "听写", ["tab.dictionary"] = "词典", ["tab.model"] = "模型",
         ["tab.records"] = "记录",
         ["tab.permissions"] = "权限", ["tab.about"] = "关于",
         ["records.empty"] = "暂无记录",
@@ -376,7 +376,7 @@ public static class L10n
 
         ["settings.title"] = "環境設定",
         ["settings.window.title"] = "Vibe XASR 設定",
-        ["tab.general"] = "一般", ["tab.dictation"] = "音声入力", ["tab.model"] = "モデル",
+        ["tab.general"] = "一般", ["tab.dictation"] = "音声入力", ["tab.dictionary"] = "辞書", ["tab.model"] = "モデル",
         ["tab.records"] = "記録",
         ["tab.permissions"] = "権限", ["tab.about"] = "情報",
         ["records.empty"] = "記録はまだありません",
@@ -516,7 +516,7 @@ public static class L10n
 
         ["settings.title"] = "환경설정",
         ["settings.window.title"] = "Vibe XASR 설정",
-        ["tab.general"] = "일반", ["tab.dictation"] = "받아쓰기", ["tab.model"] = "모델",
+        ["tab.general"] = "일반", ["tab.dictation"] = "받아쓰기", ["tab.dictionary"] = "사전", ["tab.model"] = "모델",
         ["tab.records"] = "기록",
         ["tab.permissions"] = "권한", ["tab.about"] = "정보",
         ["records.empty"] = "아직 기록이 없습니다",

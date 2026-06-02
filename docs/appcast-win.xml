@@ -12,24 +12,29 @@
     <description>Vibe XASR Windows auto-update feed</description>
     <language>zh</language>
     <item>
-      <title>Vibe XASR 1.1.3.1-beta</title>
-      <pubDate>Tue, 02 Jun 2026 09:40:00 +0800</pubDate>
-      <link>https://github.com/liutaocode/Vibe_XASR/releases/tag/v1.1.3</link>
+      <title>Vibe XASR 1.2.0.1-beta</title>
+      <pubDate>Tue, 02 Jun 2026 21:38:21 +0800</pubDate>
+      <link>https://github.com/liutaocode/Vibe_XASR/releases/tag/v1.2.0</link>
       <description><![CDATA[
-        <h3>Vibe XASR 1.1.3.1-beta (Windows)</h3>
+        <h3>Vibe XASR 1.2.0.1-beta (Windows)</h3>
         <ul>
-          <li>语音活动检测默认改用 FireRedVAD(与 macOS 同款原生引擎),中文断句更准。</li>
-          <li>新增首次使用引导:说明应用在屏幕右下角系统托盘、基本用法、识别引擎准备状态。</li>
-          <li>安装完成后自动启动应用(进入引导)。</li>
+          <li>新增「词典」(与 macOS 1.2.0 同步):
+            <ul>
+              <li>热词加权:把人名 / 术语 / 专有名词加进词典,识别更偏向它们。</li>
+              <li>同音字纠正:把同音的字自动改成词典里的写法(贾阳清 → 贾扬清)。</li>
+              <li>文本替换:识别结果按「错 => 对」规则自动修正。</li>
+            </ul>
+          </li>
+          <li>在「设置 - 词典」中编辑词条、调节强度并开关各项功能。</li>
         </ul>
       ]]></description>
       <enclosure
-        url="https://github.com/liutaocode/Vibe_XASR/releases/download/v1.1.3/VibeXASR-1.1.3.1-windows-x64.msi"
+        url="https://github.com/liutaocode/Vibe_XASR/releases/download/v1.2.0/VibeXASR-1.2.0.1-windows-x64.msi"
         sparkle:os="windows"
-        sparkle:version="1.1.3.1"
-        sparkle:shortVersionString="1.1.3.1-beta"
-        sparkle:edSignature="mf0H2X7+1nM5UIZP/T1QIlXyB/9N8eqt/vwV8Y0NS0PDiUgx8z9sND+8k7mnyaNKltBWwCdoo0rJcCZ3TlDDDA=="
-        length="628371456"
+        sparkle:version="1.2.0.1"
+        sparkle:shortVersionString="1.2.0.1-beta"
+        sparkle:edSignature="MtNMDp+IdnPmkAIi4Xyt/QtCtAdUHyWrtTYb5C+JX/3+Qr1jSkQCVhIZEpfOwM2YOKAADmSwGPNAM5cMWu6SCg=="
+        length="628543488"
         type="application/octet-stream" />
     </item>
   </channel>

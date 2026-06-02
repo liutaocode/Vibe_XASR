@@ -62,6 +62,12 @@
       <Component Directory="ModelsFolder" Guid="*">
         <File Source="payload\models\silero_vad.onnx" KeyPath="yes" />
       </Component>
+      <Component Directory="ModelsFolder" Guid="*">
+        <File Source="payload\models\pinyin.txt" KeyPath="yes" />
+      </Component>
+      <Component Directory="ModelsFolder" Guid="*">
+        <File Source="payload\models\bpe.vocab" KeyPath="yes" />
+      </Component>
       <Component Directory="TierFolder" Guid="*">
         <File Source="payload\models\chunk-960ms-model\encoder-960ms.onnx" KeyPath="yes" />
       </Component>

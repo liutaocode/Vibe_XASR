@@ -101,6 +101,7 @@ public sealed class SettingsForm : Form
         {
             ("general", "tab.general", "⚙"),
             ("dictation", "tab.dictation", "🎙"),
+            ("dictionary", "tab.dictionary", "📖"),
             ("model", "tab.model", "🧠"),
             ("records", "tab.records", "📋"),
             ("permissions", "tab.permissions", "🔐"),
@@ -164,6 +165,7 @@ public sealed class SettingsForm : Form
             {
                 case "general": BuildGeneral(col); break;
                 case "dictation": BuildDictation(col); break;
+                case "dictionary": BuildDictionary(col); break;
                 case "model": BuildModel(col); _modelTimer.Start(); break;
                 case "records": BuildRecords(); break;
                 case "permissions": BuildPermissions(col); break;
@@ -511,6 +513,85 @@ public sealed class SettingsForm : Form
         }
         cluster.Size = cluster.GetPreferredSize(Size.Empty);
         return Row(title, help, cluster);
+    }
+
+    // ---- Dictionary (词典): hotword bias + homophone correction + replacements ----
+
+    private void BuildDictionary(Column col)
+    {
+        bool zh = L10n.Resolved == Lang.Zh;
+
+        // ===== Hotwords (加词偏置) =====
+        var hwEnable = Toggle(S.HotwordsEnabled, _ => { });          // read on Save & apply
+        var hwBox = MakeEditor(S.HotwordsText, 150);
+        var scoreSel = new VibeSelect
+        {
+            Width = 150,
+            Options = new[] { ("3", zh ? "低" : "Low"), ("5", zh ? "中" : "Mid"), ("7", zh ? "高" : "High") },
+            Value = ((int)Math.Round(S.HotwordsScore)).ToString(),
+        };
+        var pinyin = Toggle(S.PinyinFuzzyEnabled, on => _app.SetPinyinFuzzy(on));   // live
+        var hwSave = new VibeButton { Text = zh ? "保存并应用" : "Save & apply", Style = VibeButton.Kind.Solid, Size = new Size(124, 32) };
+        hwSave.Click += (_, _) =>
+        {
+            double score = double.TryParse(scoreSel.Value, out var sc) ? sc : 5.0;
+            _app.SetHotwords(hwEnable.Checked, hwBox.Text, score);
+        };
+
+        col.AddGroup(zh ? "热词 · 加词偏置" : "Hotwords", new List<Control>
+        {
+            Row(zh ? "启用热词" : "Enable hotwords",
+                zh ? "把人名 / 术语 / 专有名词加进来,识别更偏向它们。" : "Add names / jargon so the recognizer favours them.", hwEnable),
+            EditorHost(zh ? "每行一个词(中 / 英 / 混合):" : "One phrase per line (zh / en / mixed):", hwBox),
+            Row(zh ? "强度" : "Strength",
+                zh ? "中文用整体强度;英文会自动封顶以免变形。" : "CJK uses this strength; English is auto-capped to avoid distortion.", scoreSel),
+            Row(zh ? "同音字纠正" : "Homophone fix",
+                zh ? "把同音的字自动改成词典里的写法(贾阳清 → 贾扬清)。" : "Rewrite same-sounding chars to your dictionary spelling.", pinyin),
+            ButtonHost(hwSave),
+        });
+
+        // ===== Replacements (替换) =====
+        var repEnable = Toggle(S.ReplacementsEnabled, _ => { });
+        var repBox = MakeEditor(S.ReplacementsText, 120);
+        var repSave = new VibeButton { Text = zh ? "保存并应用" : "Save & apply", Style = VibeButton.Kind.Solid, Size = new Size(124, 32) };
+        repSave.Click += (_, _) => _app.SetReplacements(repEnable.Checked, repBox.Text);
+
+        col.AddGroup(zh ? "替换" : "Replacements", new List<Control>
+        {
+            Row(zh ? "启用替换" : "Enable replacements",
+                zh ? "识别结果出来后自动替换(纠正固定错词 / 品牌写法)。" : "Auto-fix the recognized text (brand spellings, stubborn errors).", repEnable),
+            EditorHost(zh ? "每行「错 => 对」:" : "One rule per line, \"from => to\":", repBox),
+            ButtonHost(repSave),
+        });
+    }
+
+    private TextBox MakeEditor(string? text, int height) => new()
+    {
+        Multiline = true, ScrollBars = ScrollBars.Vertical, WordWrap = false,
+        Font = Theme.Mono(10f), BackColor = Theme.Surface2, ForeColor = Theme.Text,
+        BorderStyle = BorderStyle.FixedSingle, Width = _innerWidth - 32, Height = height,
+        Text = (text ?? "").Replace("\r\n", "\n").Replace("\n", "\r\n"),
+    };
+
+    private Control EditorHost(string caption, TextBox box)
+    {
+        var host = new Panel { BackColor = Theme.Surface, Width = _innerWidth, Height = box.Height + 28 };
+        host.Controls.Add(new Label
+        {
+            Text = caption, Font = Theme.Ui(9.5f), ForeColor = Theme.TextMuted, AutoSize = false,
+            Location = new Point(16, 4), Size = new Size(_innerWidth - 32, 18), BackColor = Color.Transparent,
+        });
+        box.Location = new Point(16, 24);
+        host.Controls.Add(box);
+        return host;
+    }
+
+    private Control ButtonHost(VibeButton btn)
+    {
+        var host = new Panel { BackColor = Theme.Surface, Width = _innerWidth, Height = 48 };
+        btn.Location = new Point(_innerWidth - btn.Width - 16, 8);
+        host.Controls.Add(btn);
+        return host;
     }
 
     // ---- About ----

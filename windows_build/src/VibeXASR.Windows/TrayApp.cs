@@ -10,6 +10,7 @@ using NAudio.Wave;
 using NAudio.Wave.SampleProviders;
 using VibeXASR.Windows.Dictation;
 using VibeXASR.Windows.Input;
+using VibeXASR.Windows.Lexicon;
 using VibeXASR.Windows.Models;
 using VibeXASR.Windows.Storage;
 using VibeXASR.Windows.Ui;
@@ -28,6 +29,8 @@ public sealed class TrayApp : IDisposable, IAppController
 
     private readonly Settings _settings;
     private readonly HistoryStore _history = new();
+    private readonly PinyinNormalizer _pinyin = new();                                  // 词典: homophone correction
+    private IReadOnlyList<Replacements.Rule> _replaceRules = Array.Empty<Replacements.Rule>(); // 词典: replacements
     private readonly ModelManager _models;
 
     private NotifyIcon? _tray;
@@ -80,6 +83,7 @@ public sealed class TrayApp : IDisposable, IAppController
         _popup = new TrayPopupForm(this);
 
         BuildTray();
+        RefreshCorrections();   // 词典: load homophone table + replacement rules
 
         _hotkey = new GlobalHotkey(_settings.HotkeyVk);
         _hotkey.KeyDown += (_, _) => OnHotkeyDown();
@@ -115,6 +119,7 @@ public sealed class TrayApp : IDisposable, IAppController
             case "mictest": _ = MicTestAsync(); break; // capture real mic → save WAV → run ASR
             case "checkupdate": Updater.Initialize(_ui, Quit); Updater.CheckForUpdatesUi(); break; // WinSparkle UI
             case "onboard": ShowOnboarding(); break; // preview the first-run guide
+            case "dicttest": RunDictTest(); break; // 词典 post-processor validation
             case "oncallsession": // populate a fake current-session log + open the session transcript view
                 lock (_onCallSession)
                 {
@@ -534,30 +539,82 @@ public sealed class TrayApp : IDisposable, IAppController
             return;
         }
 
+        // 词典 post-processing: homophone (pinyin) correction → text replacements, before insert.
+        var text = ApplyCorrections(e.Text);
+
         var modeTag = _settings.Mode.ToString().ToLowerInvariant();
-        _history.Append(e.Text, modeTag, ephemeral: !_settings.HistoryEnabled);
+        _history.Append(text, modeTag, ephemeral: !_settings.HistoryEnabled);
 
         switch (_settings.Mode)
         {
             case DictationMode.Paste:
-                TextInserter.InsertText(e.Text);
-                MaybeOverwriteClipboard(e.Text);
+                TextInserter.InsertText(text);
+                MaybeOverwriteClipboard(text);
                 _overlay?.ShowInserted();
                 break;
             case DictationMode.Type:
-                StreamTypeDiff(e.Text);
+                StreamTypeDiff(text);
                 _typedSoFar = string.Empty;
-                MaybeOverwriteClipboard(e.Text);
+                MaybeOverwriteClipboard(text);
                 _overlay?.ShowInserted();
                 break;
             case DictationMode.OnCall:
                 lock (_onCallSession)
-                    _onCallSession.Add(new HistoryEntry { Text = e.Text.Trim(), Mode = "oncall", Timestamp = DateTimeOffset.Now });
+                    _onCallSession.Add(new HistoryEntry { Text = text.Trim(), Mode = "oncall", Timestamp = DateTimeOffset.Now });
                 RefreshOnCallSession();
-                _overlay?.SetText(e.Text);
+                _overlay?.SetText(text);
                 break;
         }
         RefreshOpenWindows();
+    }
+
+    /// <summary>Apply the 词典 post-processors to a final: homophone (pinyin) correction, then text
+    /// replacements. No-ops unless enabled + populated.</summary>
+    private string ApplyCorrections(string textIn)
+    {
+        var text = textIn;
+        if (_settings.PinyinFuzzyEnabled && _pinyin.IsActive) text = _pinyin.Normalize(text);
+        if (_settings.ReplacementsEnabled && _replaceRules.Count > 0) text = Replacements.Apply(text, _replaceRules);
+        return text;
+    }
+
+    /// <summary>(Re)load the homophone table + dictionary words + replacement rules from settings.
+    /// Called on launch and whenever the 词典 settings change (no engine rebuild needed for these).</summary>
+    private void RefreshCorrections()
+    {
+        try
+        {
+            _pinyin.LoadTableIfNeeded(ModelPaths.ForTier(_settings.Tier).PinyinTable);
+            _pinyin.SetWords(_settings.PinyinFuzzyEnabled ? HotwordsStore.Normalize(_settings.HotwordsText) : new List<string>());
+            _replaceRules = _settings.ReplacementsEnabled ? Replacements.Parse(_settings.ReplacementsText) : Array.Empty<Replacements.Rule>();
+            Diag.Log($"corrections: pinyin={_pinyin.IsActive} rules={_replaceRules.Count}");
+        }
+        catch (Exception ex) { Diag.Log("RefreshCorrections failed: " + ex.Message); }
+    }
+
+    /// <summary>Hidden 词典 self-test (VIBEXASR_OPEN=dicttest): exercises the hotwords-file writer,
+    /// the pinyin homophone normalizer, and the replacement engine on sample text → log.txt.</summary>
+    private void RunDictTest()
+    {
+        var paths = ModelPaths.ForTier(_settings.Tier);
+        try
+        {
+            HotwordsStore.WriteFile("贾扬清\n沈向洋\nOpenAI\nPyTorch", 5.0, paths.HotwordsFile);
+            Diag.Log("dicttest hotwords.txt:\n" + (File.Exists(paths.HotwordsFile) ? File.ReadAllText(paths.HotwordsFile) : "(none)"));
+
+            var pn = new PinyinNormalizer();
+            pn.LoadTableIfNeeded(paths.PinyinTable);
+            pn.SetWords(new[] { "贾扬清", "沈向洋" });
+            Diag.Log($"dicttest pinyin active={pn.IsActive}");
+            foreach (var t in new[] { "贾阳清", "嘉阳青", "沈向阳", "你好世界" })
+                Diag.Log($"  pinyin '{t}' -> '{pn.Normalize(t)}'");
+
+            var rules = Replacements.Parse("open claw => OpenClaw\n李牧 => 李沐");
+            foreach (var t in new[] { "我用 open claw 框架", "李牧老师", "OPEN CLAW yes" })
+                Diag.Log($"  replace '{t}' -> '{Replacements.Apply(t, rules)}'");
+            Diag.Log("dicttest done");
+        }
+        catch (Exception ex) { Diag.Log("dicttest error: " + ex); }
     }
 
     private void MaybeOverwriteClipboard(string text)
@@ -658,6 +715,32 @@ public sealed class TrayApp : IDisposable, IAppController
 
     public void SetClipboardOverwrite(bool on) { _settings.ClipboardOverwrite = on; _settings.Save(); }
     public void SetHistoryEnabled(bool on) { _settings.HistoryEnabled = on; _settings.Save(); }
+
+    // ---- 词典 (dictionary) ----
+    public void SetHotwords(bool enabled, string text, double score)
+    {
+        _settings.HotwordsEnabled = enabled;
+        _settings.HotwordsText = text ?? "";
+        _settings.HotwordsScore = score;
+        _settings.Save();
+        RefreshCorrections();                  // pinyin words are derived from the hotwords list
+        _ = EnsureEngineAsync(swapping: true);  // rebuild so sherpa picks up the new biasing
+    }
+
+    public void SetReplacements(bool enabled, string text)
+    {
+        _settings.ReplacementsEnabled = enabled;
+        _settings.ReplacementsText = text ?? "";
+        _settings.Save();
+        RefreshCorrections();                   // live; no engine rebuild
+    }
+
+    public void SetPinyinFuzzy(bool on)
+    {
+        _settings.PinyinFuzzyEnabled = on;
+        _settings.Save();
+        RefreshCorrections();                   // live; no engine rebuild
+    }
 
     public void SetLaunchAtLogin(bool on)
     {

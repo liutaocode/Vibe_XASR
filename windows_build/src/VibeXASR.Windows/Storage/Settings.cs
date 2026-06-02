@@ -86,6 +86,29 @@ public sealed class Settings
     /// <summary>Selected microphone endpoint ID. Empty = the system default recording device.</summary>
     public string MicDeviceId { get; set; } = "";
 
+    // ---- Dictionary (词典): hotword bias + pinyin homophone correction + replacements ----
+
+    /// <summary>Master switch for hotword contextual biasing. On → engine rebuilds with the hotwords
+    /// file (modified_beam_search); off keeps the byte-for-byte greedy recipe.</summary>
+    public bool HotwordsEnabled { get; set; } = false;
+
+    /// <summary>Newline-separated hotword phrases (names / jargon to bias the ASR toward). Seeded
+    /// with examples so the 词典 page demonstrates the feature.</summary>
+    public string HotwordsText { get; set; } = "贾扬清\n沈向洋\nPyTorch\nOpenAI\ntransformer\n向量数据库";
+
+    /// <summary>Hotword boost: 3 (low) / 5 (mid) / 7 (high) for CJK; English auto-capped ≤2.5.</summary>
+    public double HotwordsScore { get; set; } = 5.0;
+
+    /// <summary>Homophone correction (rewrite same-sounding CJK runs to a dictionary word). On by
+    /// default but inert until the user adds multi-char hotwords that drive it.</summary>
+    public bool PinyinFuzzyEnabled { get; set; } = true;
+
+    /// <summary>Master switch for post-recognition text replacement.</summary>
+    public bool ReplacementsEnabled { get; set; } = false;
+
+    /// <summary>Newline-separated replacement rules, each "from =&gt; to".</summary>
+    public string ReplacementsText { get; set; } = "";
+
     // ---- persistence ----
 
     private static readonly JsonSerializerOptions JsonOpts = new()

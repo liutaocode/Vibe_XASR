@@ -62,6 +62,11 @@ if (-not (Test-Path $sv)) {
     Invoke-WebRequest "https://github.com/snakers4/silero-vad/raw/v4.0/files/silero_vad.onnx" -OutFile $sv -UseBasicParsing
 }
 
+# Dictionary resources: pinyin homophone table (committed in macos_build) + bpe.vocab for
+# hotword tokenization, generated from the bundled tokens.txt.
+Copy-Item (Join-Path (Split-Path $repo -Parent) "macos_build\native\app\Resources\pinyin.txt") (Join-Path $payload "models\pinyin.txt") -Force
+& (Join-Path $here "make-bpe-vocab.ps1") -Tokens (Join-Path $tier "tokens.txt") -Out (Join-Path $payload "models\bpe.vocab")
+
 # --- 3. build the MSI (Version flows into the WiX Package/@Version) ---
 Write-Host "Building MSI v$Version ..." -ForegroundColor Cyan
 Push-Location $here

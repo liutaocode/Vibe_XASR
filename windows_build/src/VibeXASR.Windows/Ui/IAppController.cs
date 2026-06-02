@@ -28,6 +28,11 @@ public interface IAppController
     void SetHistoryEnabled(bool on);
     void SetLaunchAtLogin(bool on);
 
+    // ----- 词典 (dictionary): hotword bias + pinyin homophone correction + replacements -----
+    void SetHotwords(bool enabled, string text, double score);
+    void SetReplacements(bool enabled, string text);
+    void SetPinyinFuzzy(bool on);
+
     // ----- permissions (Windows: microphone privacy) -----
     bool MicGranted();
     void OpenMicPrivacy();

@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Threading;
+using VibeXASR.Windows.Lexicon;
 using VibeXASR.Windows.Models;
 using VibeXASR.Windows.Storage;
 
@@ -107,7 +109,16 @@ public sealed class DictationEngine : IDisposable
     {
         if (_running) return;
 
-        _asr = new StreamingAsr(_paths, SampleRate);
+        // Hotwords (词典): write/remove the file from settings + resolve the bundled bpe.vocab.
+        string? hwFile = null, bpe = null;
+        var hwPath = _paths.HotwordsFile;
+        if (_settings.HotwordsEnabled && HotwordsStore.WriteFile(_settings.HotwordsText, _settings.HotwordsScore, hwPath))
+        {
+            hwFile = hwPath;
+            if (File.Exists(_paths.BpeVocab)) bpe = _paths.BpeVocab;
+        }
+        else { try { if (File.Exists(hwPath)) File.Delete(hwPath); } catch { /* best-effort */ } }
+        _asr = new StreamingAsr(_paths, SampleRate, hwFile, (float)_settings.HotwordsScore, bpe);
         _vad = new Vad(_paths, _paths.ResolveVad(_settings.Vad), SampleRate);
 
         _running = true;

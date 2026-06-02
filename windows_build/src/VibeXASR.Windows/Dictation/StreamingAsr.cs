@@ -1,5 +1,6 @@
 using System;
 using System.Globalization;
+using System.IO;
 using System.Text;
 using VibeXASR.Windows.Models;
 
@@ -22,13 +23,24 @@ public sealed class StreamingAsr : IDisposable
     private OnlineStream _stream;
     private readonly int _sampleRate;
 
-    public StreamingAsr(ModelPaths paths, int sampleRate = 16000)
+    public StreamingAsr(ModelPaths paths, int sampleRate = 16000,
+                        string? hotwordsFile = null, float hotwordsScore = 5f, string? bpeVocab = null)
     {
         _sampleRate = sampleRate;
 
         if (!paths.AsrModelPresent())
             throw new InvalidOperationException(
                 $"ASR model files missing under {paths.TierDir}. Run ModelDownloader first.");
+
+        // Contextual biasing (the 词典/hotwords feature): only enable beam search + biasing when a
+        // non-empty hotwords file exists, so users without hotwords keep the byte-for-byte greedy
+        // recipe (no latency/behaviour change). This model encodes each CJK char as its own ▁-piece
+        // (no bare-char tokens), so hotwords are tokenized via the "bpe" unit + an augmented
+        // bpe.vocab; without the vocab we fall back to cjkchar (no biasing, harmless).
+        bool hasHotwords = !string.IsNullOrEmpty(hotwordsFile) && File.Exists(hotwordsFile)
+                           && new FileInfo(hotwordsFile).Length > 0;
+        string bpe = (hasHotwords && !string.IsNullOrEmpty(bpeVocab) && File.Exists(bpeVocab)) ? bpeVocab! : "";
+        string modelingUnit = (hasHotwords && bpe.Length > 0) ? "bpe" : "cjkchar";
 
         // ---- build sherpa-onnx config (mirrors the macOS SherpaASR "verified recipe") ----
         var config = new OnlineRecognizerConfig();
@@ -44,15 +56,22 @@ public sealed class StreamingAsr : IDisposable
         config.ModelConfig.NumThreads = 2;
         config.ModelConfig.Provider = "cpu"; // "cpu" is safe on both x64 and arm64.
         config.ModelConfig.Debug = 0;
+        // modeling_unit/bpe_vocab only affect HOTWORD encoding, never the decode path — inert when off.
+        config.ModelConfig.ModelingUnit = modelingUnit;
+        config.ModelConfig.BpeVocab = hasHotwords ? bpe : "";
 
-        config.DecodingMethod = "greedy_search";
+        // sherpa only honours hotwords under modified_beam_search; greedy otherwise.
+        config.DecodingMethod = hasHotwords ? "modified_beam_search" : "greedy_search";
         config.MaxActivePaths = 4;
+        config.HotwordsFile = hasHotwords ? hotwordsFile! : "";
+        config.HotwordsScore = hotwordsScore;
 
         // Endpointing OFF — segmentation is driven by our VAD (OnCall) / the hotkey
         // (push-to-talk), exactly like the macOS engine. Letting sherpa fire its own
         // endpoint would reset the stream mid-utterance and fragment the text.
         config.EnableEndpoint = 0;
 
+        Diag.Log($"asr: hotwords={hasHotwords} unit={modelingUnit} decode={(hasHotwords ? "beam" : "greedy")}");
         _recognizer = new OnlineRecognizer(config);
         _stream = _recognizer.CreateStream();
     }
