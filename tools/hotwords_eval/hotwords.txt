@@ -1,0 +1,11 @@
+# Global hotword list — write words naturally, one per line.
+# Chinese / English / mixed all fine; the harness + app apply the same
+# normalization (CJK char-spacing + per-word boost). Lines starting with # ignored.
+# Advanced: append " :N" to a line to override that word's boost, e.g. "李沐 :8".
+贾扬清
+李沐
+沈向洋
+向量数据库
+OpenAI
+Anthropic
+transformer

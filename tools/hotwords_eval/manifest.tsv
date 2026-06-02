@@ -1,0 +1,12 @@
+# Hotword eval manifest — one utterance per line, TAB-separated:
+#   <wav path>  <reference text>  <target hotwords for THIS line, comma-separated>
+# Lines starting with # are ignored. wav = 16 kHz mono (run_ab.sh decodes as-is).
+#
+# Record your own audio (most representative!), or synthesize with macOS `say`:
+#   say -v Meijia   -o t.aiff "贾扬清是一位科学家"; ffmpeg -i t.aiff -ar 16000 -ac 1 wav/zh1.wav
+#   say -v Samantha -o t.aiff "I use OpenAI a lot";   ffmpeg -i t.aiff -ar 16000 -ac 1 wav/en1.wav
+#
+# Example rows (replace with your own; paths are relative to where you run run_ab.sh):
+wav/zh1.wav	贾扬清是一位科学家	贾扬清
+wav/zh2.wav	我在听李沐讲深度学习	李沐
+wav/en1.wav	I use OpenAI and Anthropic every day	OpenAI,Anthropic
