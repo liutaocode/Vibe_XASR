@@ -12,26 +12,24 @@
     <description>Vibe XASR Windows auto-update feed</description>
     <language>zh</language>
     <item>
-      <title>Vibe XASR 1.3.0.1-beta</title>
-      <pubDate>Wed, 03 Jun 2026 00:13:26 +0800</pubDate>
+      <title>Vibe XASR 1.3.0.2-beta</title>
+      <pubDate>Wed, 03 Jun 2026 10:56:45 +0800</pubDate>
       <link>https://github.com/liutaocode/Vibe_XASR/releases/tag/v1.3.0</link>
       <description><![CDATA[
-        <h3>Vibe XASR 1.3.0.1-beta (Windows)</h3>
+        <h3>Vibe XASR 1.3.0.2-beta (Windows)</h3>
         <ul>
-          <li>新增「数字规整」:说完时把口语数字转成阿拉伯数字(一百二十三→123、三点半→3:30、
-              百分之二十→20%),成语 / 计数词不动。默认开启。</li>
-          <li>新增「去口水词」:自动去掉「嗯 / 呃 / 唉」和口吃式重复(那个那个→那个),叠词保留。默认开启。</li>
-          <li>新增「口令」标签页:说一个触发词,自动展开成预存文本(邮箱 / 签名 / 样板代码都好用)。</li>
-          <li>(录音设备选择 Windows 早已支持,见「设置 - 权限」。)</li>
+          <li>补齐「提示音」(与 macOS 同步):听写开始 / 结束时一声轻提示音,5 种音色(轻点 / 清脆 /
+              柔和 / 水滴 / 木琴)+ 低 / 中 / 高音量,切换时试听,默认开启。在「设置 - 听写」里调。</li>
+          <li>(同时包含 1.3.0.1 的数字规整 / 去口水词 / 口令。)</li>
         </ul>
       ]]></description>
       <enclosure
-        url="https://github.com/liutaocode/Vibe_XASR/releases/download/v1.3.0/VibeXASR-1.3.0.1-windows-x64.msi"
+        url="https://github.com/liutaocode/Vibe_XASR/releases/download/v1.3.0/VibeXASR-1.3.0.2-windows-x64.msi"
         sparkle:os="windows"
-        sparkle:version="1.3.0.1"
-        sparkle:shortVersionString="1.3.0.1-beta"
-        sparkle:edSignature="3eDrW4co4sc1l0lyvu8/6SjKwssIBCpUGZITMSyW0LSjg4mRMk0WzeFBwhAMMCOOzTHQ3xJVAl5QaTC60u+2AQ=="
-        length="628559872"
+        sparkle:version="1.3.0.2"
+        sparkle:shortVersionString="1.3.0.2-beta"
+        sparkle:edSignature="GKmuwo8UDJSiPCGITW4E5s9jxhP8Jb5EVk8QkefgklUmxVs4LqIGzmlWrGNoJlsNTLEaQzdcn6yRtvn9aveIDQ=="
+        length="628563968"
         type="application/octet-stream" />
     </item>
   </channel>

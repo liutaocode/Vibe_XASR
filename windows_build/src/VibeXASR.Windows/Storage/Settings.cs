@@ -86,6 +86,17 @@ public sealed class Settings
     /// <summary>Selected microphone endpoint ID. Empty = the system default recording device.</summary>
     public string MicDeviceId { get; set; } = "";
 
+    // ---- Cue sound (Typeless-style chime on dictation start/stop) ----
+
+    /// <summary>Play a soft cue when dictation starts and ends. On by default.</summary>
+    public bool CueEnabled { get; set; } = true;
+
+    /// <summary>Cue timbre: "tick" | "chime" | "soft" | "drop" | "marimba". Default "chime".</summary>
+    public string CueTheme { get; set; } = "chime";
+
+    /// <summary>Cue volume preset: "low" (default) | "med" | "high".</summary>
+    public string CueVolume { get; set; } = "low";
+
     // ---- Dictionary (词典): hotword bias + pinyin homophone correction + replacements ----
 
     /// <summary>Master switch for hotword contextual biasing. On → engine rebuilds with the hotwords

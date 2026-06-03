@@ -254,8 +254,43 @@ public sealed class SettingsForm : Form
                 Toggle(S.ItnEnabled, v => _app.SetItn(v))),
             Row(L10n.T("dict.defiller"), L10n.T("dict.defiller.help"),
                 Toggle(S.DefillerEnabled, v => _app.SetDefiller(v))),
+            Row(L10n.T("dict.cue"), L10n.T("dict.cue.help"),
+                Toggle(S.CueEnabled, v => { _app.SetCueEnabled(v); RebuildCurrentTab(); })),
         };
+        if (S.CueEnabled)   // timbre + volume only matter when the cue is on (matches macOS)
+        {
+            rows.Add(Row(L10n.T("dict.cueTheme"), L10n.T("dict.cueTheme.help"), CueThemeSelect()));
+            rows.Add(Row(L10n.T("dict.cueVol"), L10n.T("dict.cueVol.help"), CueVolSegmented()));
+        }
         col.AddGroup(L10n.T("grp.dictation"), rows);
+    }
+
+    private Control CueThemeSelect()
+    {
+        var sel = new VibeSelect
+        {
+            Width = 150,
+            Options = new[]
+            {
+                ("tick", L10n.T("cue.tick")), ("chime", L10n.T("cue.chime")), ("soft", L10n.T("cue.soft")),
+                ("drop", L10n.T("cue.drop")), ("marimba", L10n.T("cue.marimba")),
+            },
+            Value = S.CueTheme,
+        };
+        sel.SelectionChanged += (_, v) => _app.SetCueTheme(v);   // previews the new timbre
+        return sel;
+    }
+
+    private Control CueVolSegmented()
+    {
+        var seg = new SegmentedControl
+        {
+            Width = 168,
+            Options = new[] { ("low", L10n.T("vol.low")), ("med", L10n.T("vol.mid")), ("high", L10n.T("vol.high")) },
+            Value = S.CueVolume,
+        };
+        seg.SelectionChanged += (_, v) => _app.SetCueVolume(v);   // applies + previews at the new volume
+        return seg;
     }
 
     private Control ModeList()

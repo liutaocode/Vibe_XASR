@@ -86,6 +86,7 @@ public sealed class TrayApp : IDisposable, IAppController
 
         BuildTray();
         RefreshCorrections();   // 词典: load homophone table + replacement rules
+        CueSound.Shared.SetVolume(_settings.CueVolume);   // 提示音: sync cue volume from settings
 
         _hotkey = new GlobalHotkey(_settings.HotkeyVk);
         _hotkey.KeyDown += (_, _) => OnHotkeyDown();
@@ -502,6 +503,7 @@ public sealed class TrayApp : IDisposable, IAppController
         _listening = true;
         _engine?.BeginHold();
         _overlay?.ShowListening();
+        if (_settings.CueEnabled) CueSound.Shared.Play(_settings.CueTheme, start: true);   // 提示音: start chime
     }
 
     private void OnHotkeyUp()
@@ -511,6 +513,7 @@ public sealed class TrayApp : IDisposable, IAppController
         _listening = false;
         Diag.Log($"OnHotkeyUp; peak mic RMS={_holdPeakRms:F4}");
         _engine?.EndHold();
+        if (_settings.CueEnabled) CueSound.Shared.Play(_settings.CueTheme, start: false);  // 提示音: stop chime
     }
 
     // ---- engine events (raised on the engine worker thread) ----
@@ -659,6 +662,12 @@ public sealed class TrayApp : IDisposable, IAppController
             var snips = ParseSnippets("[{\"t\":\"我的邮箱\",\"x\":\"tao@example.com\"},{\"t\":\"cc\",\"x\":\"抄送\"}]");
             foreach (var t in new[] { "请发到我的邮箱。", "麻烦 C C 一下", "我的邮箱" })
                 Diag.Log($"  snippet '{t}' -> '{Replacements.Expand(t, snips)}'");
+
+            // 提示音 (cue) — verify synthesis + playback path doesn't throw (covers sine + FM timbres)
+            CueSound.Shared.SetVolume("med");
+            CueSound.Shared.Play("chime", start: true);
+            CueSound.Shared.Play("marimba", start: false);
+            Diag.Log("  cue: chime/marimba rendered + played ok");
             Diag.Log("dicttest done");
         }
         catch (Exception ex) { Diag.Log("dicttest error: " + ex); }
@@ -807,6 +816,29 @@ public sealed class TrayApp : IDisposable, IAppController
         _settings.SnippetsJson = json ?? "[]";
         _settings.Save();
         RefreshCorrections();                   // re-parse 口令 rules; no engine rebuild
+    }
+
+    // ---- 提示音 (cue sound) — changes preview the sound so the user hears them ----
+    public void SetCueEnabled(bool on)
+    {
+        _settings.CueEnabled = on;
+        _settings.Save();
+        if (on) CueSound.Shared.Play(_settings.CueTheme, start: true);
+    }
+
+    public void SetCueTheme(string theme)
+    {
+        _settings.CueTheme = string.IsNullOrEmpty(theme) ? "chime" : theme;
+        _settings.Save();
+        if (_settings.CueEnabled) CueSound.Shared.Play(_settings.CueTheme, start: true);
+    }
+
+    public void SetCueVolume(string preset)
+    {
+        _settings.CueVolume = string.IsNullOrEmpty(preset) ? "low" : preset;
+        _settings.Save();
+        CueSound.Shared.SetVolume(_settings.CueVolume);
+        if (_settings.CueEnabled) CueSound.Shared.Play(_settings.CueTheme, start: true);
     }
 
     public void SetLaunchAtLogin(bool on)
