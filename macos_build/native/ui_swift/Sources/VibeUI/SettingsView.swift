@@ -2045,8 +2045,8 @@ private struct AboutTab: View {
                 .buttonStyle(.plain)
                 .padding(.top, 4)
 
-                // Two distinct feedback channels as small text below "Check for updates":
-                // ① X-ASR engine issues   ② this app's features & requests.
+                // Single feedback channel below "Check for updates": all issues
+                // (engine, app, requests) are routed to the X-ASR engine tracker.
                 FeedbackLinks(l10n: l10n)
                     .padding(.top, 9)
 
@@ -2077,19 +2077,16 @@ private struct AboutTab: View {
     }
 }
 
-/// Two distinct feedback channels shown as small text under "Check for updates":
-///   ①  X-ASR **engine** issues  → Gilgamesh-J/X-ASR/issues
-///   ②  this **app's** features & requests → liutaocode/Vibe_XASR/issues
-/// Keeping them separate routes engine bugs vs app feedback to the right repo.
+/// A single feedback channel shown as small text under "Check for updates":
+/// all issues — engine bugs, app bugs, and feature requests — are routed to the
+/// X-ASR engine tracker (Gilgamesh-J/X-ASR/issues).
 private struct FeedbackLinks: View {
     @ObservedObject var l10n: L10n
     @Environment(\.colorScheme) private var scheme
     private let engineURL = URL(string: "https://github.com/Gilgamesh-J/X-ASR/issues")!
-    private let appURL = URL(string: "https://github.com/liutaocode/Vibe_XASR/issues")!
     var body: some View {
         VStack(spacing: 6) {
             row(icon: "waveform", text: l10n.t("about.fb.engine"), url: engineURL)
-            row(icon: "macwindow", text: l10n.t("about.fb.app"), url: appURL)
         }
     }
     private func row(icon: String, text: String, url: URL) -> some View {
