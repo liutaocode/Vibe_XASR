@@ -26,7 +26,7 @@
         </ul>
       ]]></description>
       <enclosure
-        url="https://github.com/liutaocode/Vibe_XASR/releases/download/v1.4.0/VibeXASR-1.4.0.1-windows-x64.msi"
+        url="https://github.com/Gilgamesh-J/X-ASR/releases/download/vibe-v1.4.2/VibeXASR-1.4.0.1-windows-x64.msi"
         sparkle:os="windows"
         sparkle:version="1.4.0.1"
         sparkle:shortVersionString="1.4.0.1-beta"
