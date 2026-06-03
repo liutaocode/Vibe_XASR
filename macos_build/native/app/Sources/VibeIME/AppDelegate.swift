@@ -100,6 +100,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
         installEditMenu()      // so ⌘C/⌘V/⌘X/⌘A/⌘Z work in Settings text fields
         observeSettings()
+        restartAPIServer()     // start the local share API if it was left enabled
         CueSound.shared.gain = CueSound.gain(for: store.cueVolume)   // sync cue volume
         PinyinNormalizer.shared.loadTableIfNeeded(path: ModelPaths.pinyinTablePath())
         refreshCorrections()   // load replacement rules + pinyin dictionary words
@@ -162,6 +163,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             [weak self] _ in
             MainActor.assumeIsolated { self?.applyLaunchAtLogin() }
         }
+        nc.addObserver(forName: SettingsStore.apiConfigChanged, object: nil, queue: .main) {
+            [weak self] _ in
+            MainActor.assumeIsolated { self?.restartAPIServer() }
+        }
         // When a download finishes, if the just-completed tier is the one the
         // user selected, swap the engine onto it.
         nc.addObserver(forName: SettingsStore.changed, object: nil, queue: .main) { [weak self] _ in
@@ -187,6 +192,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                         modifierOnly: store.hotkeyModifierOnly)
         wireHotkey()
         _ = hotkey.start()
+    }
+
+    /// (Re)start or stop the local share API (共享) to match current settings.
+    private func restartAPIServer() {
+        LocalAPIServer.shared.restart(port: UInt16(clamping: store.apiPort),
+                                      allowLAN: store.apiAllowLAN,
+                                      enabled: store.apiEnabled)
+    }
+
+    /// Primary LAN IPv4 (en*) — shown so a reachable URL exists when LAN access is on.
+    static func primaryLANIPv4() -> String? {
+        var result: String?
+        var ifaddr: UnsafeMutablePointer<ifaddrs>?
+        guard getifaddrs(&ifaddr) == 0 else { return nil }
+        defer { freeifaddrs(ifaddr) }
+        var ptr = ifaddr
+        while let p = ptr {
+            let f = Int32(p.pointee.ifa_flags)
+            if (f & (IFF_UP | IFF_RUNNING)) == (IFF_UP | IFF_RUNNING),
+               (f & IFF_LOOPBACK) == 0,
+               let sa = p.pointee.ifa_addr, sa.pointee.sa_family == UInt8(AF_INET),
+               String(cString: p.pointee.ifa_name).hasPrefix("en") {
+                var host = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+                if getnameinfo(sa, socklen_t(sa.pointee.sa_len), &host, socklen_t(host.count),
+                               nil, 0, NI_NUMERICHOST) == 0 {
+                    result = String(cString: host); break
+                }
+            }
+            ptr = p.pointee.ifa_next
+        }
+        return result
     }
 
     /// Clicking the Dock icon with no window open → show Settings.
@@ -307,8 +343,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         // Plain NATIVE title bar: "偏好设置" + traffic lights on ONE row. The earlier
         // transparent-titlebar + fullSizeContentView + custom strip approach rendered
         // as two rows; this avoids it entirely.
-        window.styleMask = [.titled, .closable, .miniaturizable]
-        window.setContentSize(NSSize(width: 640, height: 560))
+        window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+        // Wide enough for the redesigned 记录 workspace (sidebar + content + calendar rail).
+        window.setContentSize(NSSize(width: 1080, height: 680))
+        window.contentMinSize = NSSize(width: 720, height: 520)
         window.isReleasedWhenClosed = false
         window.center()
         window.delegate = self
@@ -350,7 +388,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let window = NSWindow(contentViewController: hosting)
         window.title = L10n.shared.t("history.title")
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
-        window.setContentSize(NSSize(width: 540, height: 480))
+        window.setContentSize(NSSize(width: 1080, height: 760))
+        window.contentMinSize = NSSize(width: 720, height: 460)
         window.isReleasedWhenClosed = false
         window.center()
         window.delegate = self
@@ -1181,6 +1220,23 @@ extension AppDelegate: SettingsBridge {
         get { store.inputDeviceUID }
         set { store.inputDeviceUID = newValue }
     }
+
+    // Local share API (共享)
+    var apiEnabled: Bool {
+        get { store.apiEnabled }
+        set { store.apiEnabled = newValue }      // posts apiConfigChanged → restartAPIServer()
+    }
+    var apiAllowLAN: Bool {
+        get { store.apiAllowLAN }
+        set { store.apiAllowLAN = newValue }
+    }
+    var apiKey: String { store.apiKey }
+    var apiPort: Int {
+        let bound = Int(LocalAPIServer.shared.boundPort)
+        return bound > 0 ? bound : store.apiPort   // reflect the actually-bound port (fallback-aware)
+    }
+    var apiLANHost: String? { store.apiAllowLAN ? AppDelegate.primaryLANIPv4() : nil }
+    @discardableResult func regenerateAPIKey() -> String { store.regenerateAPIKey() }
 
     var modelManager: ModelManagerBridge? { downloader }
 

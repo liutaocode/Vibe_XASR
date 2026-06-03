@@ -37,6 +37,9 @@ final class SettingsStore: L10nPersistence {
     static let engineConfigChanged = Notification.Name("VibeXASR.engineConfigChanged")
     /// Posted when the launch-at-login preference changes.
     static let launchAtLoginChanged = Notification.Name("VibeXASR.launchAtLoginChanged")
+    /// Posted when the local share API config changes (enable / LAN / key / port),
+    /// so the AppDelegate can (re)start or stop the embedded HTTP server.
+    static let apiConfigChanged = Notification.Name("VibeXASR.apiConfigChanged")
 
     private enum Key {
         static let showDockIcon = "showDockIcon"
@@ -65,6 +68,10 @@ final class SettingsStore: L10nPersistence {
         static let inputDeviceUID = "inputDeviceUID"
         static let snippetsEnabled = "snippetsEnabled"
         static let snippetsJSON = "snippetsJSON"
+        static let apiEnabled = "apiEnabled"
+        static let apiKey = "apiKey"
+        static let apiAllowLAN = "apiAllowLAN"
+        static let apiPort = "apiPort"
     }
 
     private let defaults: UserDefaults
@@ -99,6 +106,9 @@ final class SettingsStore: L10nPersistence {
             Key.inputDeviceUID: "",           // "" = system default microphone
             Key.snippetsEnabled: true,        // voice snippets ON by default (empty list = no-op)
             Key.snippetsJSON: "[]",
+            Key.apiEnabled: false,            // local share API OFF by default
+            Key.apiAllowLAN: false,           // localhost-only unless explicitly allowed
+            Key.apiPort: 8473,                // default port for the local share API (uncommon → fewer conflicts)
         ])
     }
 
@@ -326,6 +336,42 @@ final class SettingsStore: L10nPersistence {
             defaults.set(newValue, forKey: Key.launchAtLogin)
             post(SettingsStore.launchAtLoginChanged)
         }
+    }
+
+    // MARK: Local share API (共享 — local HTTP server for coding agents)
+
+    /// Master switch for the embedded local HTTP API. Default OFF.
+    var apiEnabled: Bool {
+        get { defaults.bool(forKey: Key.apiEnabled) }
+        set { defaults.set(newValue, forKey: Key.apiEnabled); post(SettingsStore.apiConfigChanged) }
+    }
+    /// Allow LAN (0.0.0.0) access. Default OFF → bound to 127.0.0.1 only.
+    var apiAllowLAN: Bool {
+        get { defaults.bool(forKey: Key.apiAllowLAN) }
+        set { defaults.set(newValue, forKey: Key.apiAllowLAN); post(SettingsStore.apiConfigChanged) }
+    }
+    /// TCP port for the local API (default 8765).
+    var apiPort: Int {
+        get { let v = defaults.integer(forKey: Key.apiPort); return v > 0 ? v : 8473 }
+        set { defaults.set(newValue, forKey: Key.apiPort); post(SettingsStore.apiConfigChanged) }
+    }
+    /// Bearer key required on every request. Generated + persisted on first access; never empty.
+    var apiKey: String {
+        if let k = defaults.string(forKey: Key.apiKey), !k.isEmpty { return k }
+        let k = Self.generateKey()
+        defaults.set(k, forKey: Key.apiKey)
+        return k
+    }
+    /// Rotate the key (invalidates any skill already shared with the old key).
+    @discardableResult func regenerateAPIKey() -> String {
+        let k = Self.generateKey()
+        defaults.set(k, forKey: Key.apiKey)
+        post(SettingsStore.apiConfigChanged)
+        return k
+    }
+    private static func generateKey() -> String {
+        let chars = Array("abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789")
+        return "vibe_" + String((0..<28).map { _ in chars.randomElement()! })
     }
 
     // MARK: -

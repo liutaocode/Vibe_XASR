@@ -28,7 +28,7 @@ let SPARKLE_DIR = "\(B)/native/third_party/sparkle"          // contains Sparkle
 let package = Package(
     name: "VibeIME",
     platforms: [
-        .macOS(.v13)
+        .macOS(.v14)
     ],
     dependencies: [
         .package(path: "../ui_swift")

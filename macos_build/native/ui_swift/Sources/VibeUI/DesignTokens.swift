@@ -67,6 +67,11 @@ public enum Vibe {
         public static func textMuted(_ s: ColorScheme) -> Color {
             s == .light ? Color(hex: "#71717F") : Color(hex: "#8A8A99")
         }
+        /// Fainter than textMuted — timestamps, hints, faint metadata.
+        /// design --text-faint #515b70 (dark) → a gray-violet faint in light.
+        public static func textFaint(_ s: ColorScheme) -> Color {
+            s == .light ? Color(hex: "#9C9CA9") : Color(hex: "#5A5A6B")
+        }
         /// --hairline: rgba(255,255,255,.08) dark / rgba(0,0,0,.08) light
         public static func hairline(_ s: ColorScheme) -> Color {
             s == .light ? Color.black.opacity(0.08) : Color.white.opacity(0.08)

@@ -9,6 +9,7 @@
 
 import SwiftUI
 import Combine
+import AppKit
 
 // MARK: - Host bridge
 
@@ -86,6 +87,15 @@ public protocol SettingsBridge: AnyObject {
     /// Available input devices; first entry is the "system default" (uid "").
     func inputDevices() -> [(uid: String, name: String)]
     var inputDeviceUID: String { get set }
+
+    // ----- Local share API (共享 — local HTTP server for coding agents) -----
+    var apiEnabled: Bool { get set }
+    var apiAllowLAN: Bool { get set }
+    var apiKey: String { get }
+    var apiPort: Int { get }
+    /// LAN IPv4 (e.g. "192.168.1.20") when resolvable + LAN allowed, else nil.
+    var apiLANHost: String? { get }
+    @discardableResult func regenerateAPIKey() -> String
 
     // ----- Auto-update (Sparkle, implemented in the app target) -----
     /// User-initiated update check. The host drives Sparkle's updater UI
@@ -173,6 +183,12 @@ public extension SettingsBridge {
     func openPermissionSettings(_ which: PermissionKind) {}
     func inputDevices() -> [(uid: String, name: String)] { [] }
     var inputDeviceUID: String { get { "" } set {} }
+    var apiEnabled: Bool { get { false } set {} }
+    var apiAllowLAN: Bool { get { false } set {} }
+    var apiKey: String { "vibe_demo_key" }
+    var apiPort: Int { 8765 }
+    var apiLANHost: String? { nil }
+    @discardableResult func regenerateAPIKey() -> String { "vibe_demo_key" }
 }
 
 // MARK: - Model-manager observation relay (issue #13 fix)
@@ -253,6 +269,9 @@ public final class SettingsState: ObservableObject {
     @Published public var replacementsText = ""
     @Published public var snippetsEnabled = true
     @Published public var snippetsJSON = "[]"
+    @Published public var apiEnabled = false
+    @Published public var apiAllowLAN = false
+    @Published public var apiKey = ""
 
     /// Host bridge; when set, controls read/write through it.
     public weak var bridge: SettingsBridge?
@@ -287,9 +306,16 @@ public final class SettingsState: ObservableObject {
         self.replacementsText = bridge.replacementsText
         self.snippetsEnabled = bridge.snippetsEnabled
         self.snippetsJSON = bridge.snippetsJSON
+        self.apiEnabled = bridge.apiEnabled
+        self.apiAllowLAN = bridge.apiAllowLAN
+        self.apiKey = bridge.apiKey
     }
 
     // ---- write-throughs (bridge present) or local fallback (preview) -------
+
+    public func applyAPIEnabled(_ on: Bool) { apiEnabled = on; bridge?.apiEnabled = on }
+    public func applyAPIAllowLAN(_ on: Bool) { apiAllowLAN = on; bridge?.apiAllowLAN = on }
+    public func regenerateAPIKey() { apiKey = bridge?.regenerateAPIKey() ?? apiKey }
 
     public func applyDockIcon(_ on: Bool) {
         showDockIcon = on
@@ -1845,6 +1871,121 @@ private struct Banner: View {
 /// (issue #8) The "Records / 记录" sidebar tab. Renders the host-supplied
 /// `records` view (an embedded HistoryView) when present; otherwise a centered
 /// "No records yet" hint (previews pass nil).
+/// (共享) Local share API — a key-protected, read-only local HTTP server so the
+/// user's coding agents (Claude Code / Codex / OpenClaw / Hermes …) can read
+/// their dictation records / dictionary / snippets and continue work from them.
+private struct ShareTab: View {
+    @ObservedObject var s: SettingsState
+    @ObservedObject var l10n: L10n
+    @Environment(\.colorScheme) private var scheme
+    @State private var copiedTag: String? = nil
+
+    @State private var actualPort: Int = 0
+    private var port: Int { actualPort > 0 ? actualPort : (s.bridge?.apiPort ?? 8473) }
+    private var baseURL: String { "http://127.0.0.1:\(port)" }
+    private var lanHost: String? { s.bridge?.apiLANHost }
+
+    private struct Agent: Identifiable { let id: String; let name: String; let dir: String? }
+    private let agents: [Agent] = [
+        .init(id: "openclaw", name: "OpenClaw", dir: ".openclaw/skills/vibe_xasr/"),
+        .init(id: "claude",   name: "Claude Code", dir: ".claude/skills/vibe_xasr/"),
+        .init(id: "hermes",   name: "Hermes", dir: ".hermes/skills/vibe_xasr/"),
+        .init(id: "codex",    name: "Codex", dir: nil),
+        .init(id: "generic",  name: "通用 / 其他 AI", dir: nil),
+    ]
+
+    var body: some View {
+        VStack(spacing: 18) {
+            SettingsGroup(label: "共享 · 把语音数据接到 AI 编程助手") {
+                SettingsRow(title: "启用本地共享",
+                            help: "在本机开一个只读接口,让你的 AI 编程助手读取语音记录 / 词典 / 口令。默认关闭。") {
+                    Toggle("", isOn: Binding(get: { s.apiEnabled }, set: { s.applyAPIEnabled($0) })).labelsHidden()
+                }
+                if s.apiEnabled {
+                    SettingsRow(title: "访问地址", help: "默认仅本机可访问") {
+                        Text(verbatim: baseURL).font(Vibe.Fonts.mono(12))
+                            .foregroundStyle(Vibe.Palette.text(scheme)).textSelection(.enabled)
+                    }
+                    SettingsRow(title: "鉴权 key", help: "每个请求都要带它;泄露后点「重置」即可作废旧 key。") {
+                        HStack(spacing: 8) {
+                            Text(s.apiKey).font(Vibe.Fonts.mono(12)).foregroundStyle(Vibe.Palette.text(scheme))
+                                .lineLimit(1).truncationMode(.middle).frame(maxWidth: 150)
+                            MButton(title: copiedTag == "key" ? "已复制" : "复制", kind: .ghost) { copy(s.apiKey, tag: "key") }
+                            MButton(title: "重置", kind: .danger) { s.regenerateAPIKey() }
+                        }
+                    }
+                    SettingsRow(title: "允许局域网访问",
+                                help: "默认只允许本机 127.0.0.1。开启后同一 Wi‑Fi 下的设备也能用 key 访问你的记录 —— 仅在可信网络开启。") {
+                        Toggle("", isOn: Binding(get: { s.apiAllowLAN }, set: { s.applyAPIAllowLAN($0) })).labelsHidden()
+                    }
+                    if s.apiAllowLAN {
+                        SettingsRow(title: "局域网地址", help: "同网段设备用这个地址访问") {
+                            Text(verbatim: lanHost.map { "http://\($0):\(port)" } ?? "(获取中…)")
+                                .font(Vibe.Fonts.mono(12)).foregroundStyle(Vibe.Palette.warn).textSelection(.enabled)
+                        }
+                    }
+                }
+            }
+
+            if s.apiEnabled {
+                SettingsGroup(label: "一键安装到你的 AI 助手") {
+                    ForEach(agents) { installRow($0) }
+                }
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: "lock.shield").font(.system(size: 12)).foregroundStyle(Vibe.Palette.success)
+                    Text("只读 · 纯本地 · 需 key。数据不出本机(局域网需你单独允许)。")
+                        .font(Vibe.Fonts.ui(11.5)).foregroundStyle(Vibe.Palette.textMuted(scheme))
+                    Spacer()
+                }.padding(.horizontal, 2)
+            } else {
+                Text("开启后,这里会给出可粘到 OpenClaw / Claude Code / Codex / Hermes 的一键安装指令。")
+                    .font(Vibe.Fonts.ui(12)).foregroundStyle(Vibe.Palette.textMuted(scheme))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .task(id: s.apiEnabled) {
+            actualPort = 0
+            guard s.apiEnabled else { return }
+            for _ in 0..<20 {                       // poll until the listener reports its bound port
+                if let p = s.bridge?.apiPort, p > 0 { actualPort = p }
+                try? await Task.sleep(nanoseconds: 150_000_000)
+            }
+        }
+    }
+
+    private func installRow(_ a: Agent) -> some View {
+        let text = instruction(a)
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Text(a.name).font(Vibe.Fonts.ui(13.5, weight: .bold)).foregroundStyle(Vibe.Palette.text(scheme))
+                if let d = a.dir { Text(d).font(Vibe.Fonts.mono(11)).foregroundStyle(Vibe.Palette.textMuted(scheme)) }
+                Spacer()
+                MButton(title: copiedTag == a.id ? "已复制" : "复制指令", kind: .ghost) { copy(text, tag: a.id) }
+            }
+            Text(verbatim: text).font(Vibe.Fonts.mono(11.5)).foregroundStyle(Vibe.Palette.textMuted(scheme))
+                .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.vertical, 12).padding(.horizontal, 16)
+        .background(Vibe.Palette.surface(scheme))
+    }
+
+    private func instruction(_ a: Agent) -> String {
+        let key = s.apiKey
+        if let dir = a.dir {
+            return "请帮我安装 Vibe XASR 技能:先 `mkdir -p \(dir)`,再 `curl -s -H \"Authorization: Bearer \(key)\" \(baseURL)/skill -o \(dir)SKILL.md` 取得说明并保存。之后照 SKILL.md 用它读我的语音听写记录 / 词典 / 口令(只读,仅本机)。"
+        }
+        return "我在本机跑了 Vibe XASR 只读接口。基址 `\(baseURL)`,鉴权 key `\(key)`(放进 `Authorization: Bearer` 头或 `?key=`)。完整说明:`\(baseURL)/skill`。需要我的语音记录 / 词典 / 口令时就 GET:`/v1/export?date=today&format=md`、`/v1/history?date=today`、`/v1/config/hotwords` 等。"
+    }
+
+    private func copy(_ text: String, tag: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+        copiedTag = tag
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { if copiedTag == tag { copiedTag = nil } }
+    }
+}
+
 private struct RecordsTab: View {
     @ObservedObject var l10n: L10n
     @Environment(\.colorScheme) private var scheme
@@ -2103,6 +2244,7 @@ public struct SettingsView: View {
          ("hotwords", l10n.t("tab.hotwords"), "📖"),
          ("snippet", l10n.t("tab.snippet"), "⚡"),
          ("records", l10n.t("tab.records"), "📋"),
+         ("share", "共享", "🔗"),
          ("permissions", l10n.t("tab.permissions"), "🔐"),
          ("about", l10n.t("tab.about"), "ⓘ")]
     }
@@ -2128,7 +2270,10 @@ public struct SettingsView: View {
                 content
             }
         }
-        .frame(width: 640, height: 560)
+        // Fill the (now resizable) window; the 记录 workspace needs the full width
+        // for its calendar rail. Other tabs cap their own content width (see `content`).
+        .frame(minWidth: 720, idealWidth: 1080, maxWidth: .infinity,
+               minHeight: 520, idealHeight: 680, maxHeight: .infinity)
         .background(Vibe.Palette.surface(scheme))
         // The NATIVE window title bar shows "偏好设置" + the traffic lights on one row
         // (set up in AppDelegate). No custom title strip here — that produced the
@@ -2162,10 +2307,13 @@ public struct SettingsView: View {
                     case "hotwords":    HotwordsTab(s: s, l10n: l10n)
                     case "snippet":     SnippetTab(s: s, l10n: l10n)
                     case "permissions": PermissionsTab(s: s, l10n: l10n)
+                    case "share":       ShareTab(s: s, l10n: l10n)
                     default:            AboutTab(l10n: l10n, bridge: bridge)
                     }
                 }
                 .padding(.vertical, 22).padding(.horizontal, 24)
+                .frame(maxWidth: 680)           // keep these tabs readable in the wide window
+                .frame(maxWidth: .infinity)      // …centered
             }
             .background(Vibe.Palette.surface(scheme))
         }

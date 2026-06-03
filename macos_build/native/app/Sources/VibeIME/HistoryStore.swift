@@ -32,9 +32,18 @@ final class HistoryStore: ObservableObject, HistoryBridge {
     private let fileURL: URL
 
     private struct Record: Codable {
+        var id: String?     // optional for old files; persisted so ids stay stable across reloads
         var text: String
         var date: Date
         var mode: String?   // "manual" | "oncall"; optional for old files
+        var tags: [String]? // optional for old files
+        var title: String?  // note title (整理成笔记); nil for normal entries
+    }
+
+    /// HistoryItem → on-disk Record (used by persist + export).
+    private func record(_ e: HistoryItem) -> Record {
+        Record(id: e.id.uuidString, text: e.text, date: e.date, mode: e.mode,
+               tags: e.tags.isEmpty ? nil : e.tags, title: e.title)
     }
 
     init() {
@@ -83,9 +92,81 @@ final class HistoryStore: ObservableObject, HistoryBridge {
     /// Edit an entry's text in place (issue #6). Keeps id + date; does NOT change
     /// lifetimeChars (which counts what was dictated, not the current edited text).
     func update(id: UUID, text: String) {
+        let cur = entries.first { $0.id == id }
+        update(id: id, text: text, title: cur?.title, tags: cur?.tags ?? [])
+    }
+
+    /// Rich edit (inline editor): text + note title + tags. Keeps id + date + mode.
+    func update(id: UUID, text: String, title: String?, tags: [String]) {
         guard let idx = entries.firstIndex(where: { $0.id == id }) else { return }
         let old = entries[idx]
-        entries[idx] = HistoryItem(id: old.id, text: text, date: old.date, mode: old.mode, expiresAt: old.expiresAt)
+        entries[idx] = HistoryItem(id: old.id, text: text, date: old.date, mode: old.mode,
+                                   expiresAt: old.expiresAt, tags: tags, title: title)
+        persistAsync()
+    }
+
+    /// Merge entries → one. Ascending-date join; newest entry is the anchor (kept),
+    /// others removed. asNote → newline-join + note title; else direct concat. Tags
+    /// unioned; mode = "oncall" iff every merged entry was oncall.
+    func merge(ids: [UUID], asNote: Bool, title: String?) {
+        let set = Set(ids)
+        // entries is newest-first → index 0 is the newest (top of the list).
+        let order = Dictionary(entries.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { a, _ in a })
+        // Merge in DISPLAY order: the entry shown ABOVE (newer) comes first, the one
+        // BELOW (older) after — matching what the user sees top→bottom. Stable
+        // tiebreak on list position so same-timestamp fragments never scramble.
+        let chosen = entries.filter { set.contains($0.id) }.sorted { a, b in
+            a.date != b.date ? a.date > b.date : (order[a.id] ?? 0) < (order[b.id] ?? 0)
+        }
+        guard chosen.count >= (asNote ? 1 : 2) else { return }
+        let text = chosen.map(\.text).joined(separator: asNote ? "\n" : "")
+        guard let anchor = chosen.first else { return }   // top (newest) entry = anchor → "合并到上面的时间"
+        var mergedTags: [String] = []
+        for e in chosen { for t in e.tags where !mergedTags.contains(t) { mergedTags.append(t) } }
+        let allOnCall = chosen.allSatisfy { $0.mode == "oncall" }
+        entries = entries.compactMap { e in
+            if e.id == anchor.id {
+                return HistoryItem(id: e.id, text: text, date: e.date,
+                                   mode: allOnCall ? "oncall" : "manual",
+                                   expiresAt: e.expiresAt, tags: mergedTags,
+                                   title: asNote ? (title ?? "整理笔记") : nil)
+            }
+            return set.contains(e.id) ? nil : e
+        }
+        persistAsync()
+    }
+
+    /// Union `tag` into each id.
+    func applyTag(ids: [UUID], tag: String) {
+        let set = Set(ids)
+        entries = entries.map { e in
+            guard set.contains(e.id), !e.tags.contains(tag) else { return e }
+            return HistoryItem(id: e.id, text: e.text, date: e.date, mode: e.mode,
+                               expiresAt: e.expiresAt, tags: e.tags + [tag], title: e.title)
+        }
+        persistAsync()
+    }
+
+    /// Replace an entry's tags wholesale.
+    func setTags(id: UUID, tags: [String]) {
+        guard let idx = entries.firstIndex(where: { $0.id == id }) else { return }
+        let old = entries[idx]
+        entries[idx] = HistoryItem(id: old.id, text: old.text, date: old.date, mode: old.mode,
+                                   expiresAt: old.expiresAt, tags: tags, title: old.title)
+        persistAsync()
+    }
+
+    /// Insert a blank manual entry at now; returns its id for immediate editing.
+    @discardableResult func addEntry() -> UUID {
+        let item = HistoryItem(id: UUID(), text: "", date: Date(), mode: "manual")
+        entries.insert(item, at: 0)
+        persistAsync()
+        return item.id
+    }
+
+    /// Replace the whole list (undo restore). lifetimeChars is unaffected.
+    func replaceAll(_ items: [HistoryItem]) {
+        entries = items
         persistAsync()
     }
 
@@ -102,7 +183,7 @@ final class HistoryStore: ObservableObject, HistoryBridge {
     /// write to a user-chosen file via NSSavePanel. The NSSavePanel itself lives in
     /// the AppKit-capable HistoryView.
     func exportJSONData() -> Data {
-        let records = entries.reversed().filter { $0.expiresAt == nil }.map { Record(text: $0.text, date: $0.date, mode: $0.mode) }
+        let records = entries.reversed().filter { $0.expiresAt == nil }.map(record)
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -131,14 +212,16 @@ final class HistoryStore: ObservableObject, HistoryBridge {
         }
         // Stored oldest-first; present newest-first.
         entries = records.reversed().map {
-            HistoryItem(id: UUID(), text: $0.text, date: $0.date, mode: $0.mode ?? "manual")
+            HistoryItem(id: $0.id.flatMap(UUID.init) ?? UUID(),
+                        text: $0.text, date: $0.date, mode: $0.mode ?? "manual",
+                        tags: $0.tags ?? [], title: $0.title)
         }
     }
 
     /// Snapshot the current entries and write them off the main thread.
     private func persistAsync() {
         // Store oldest-first (chronological) so external readers see natural order.
-        let records = entries.reversed().filter { $0.expiresAt == nil }.map { Record(text: $0.text, date: $0.date, mode: $0.mode) }
+        let records = entries.reversed().filter { $0.expiresAt == nil }.map(record)
         let url = fileURL
         queue.async {
             let encoder = JSONEncoder()

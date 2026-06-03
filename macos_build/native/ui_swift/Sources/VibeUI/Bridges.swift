@@ -40,8 +40,14 @@ public struct HistoryItem: Identifiable, Sendable, Equatable {
     /// When set, this is an EPHEMERAL record (history saving was off) that self-
     /// destructs at this instant; the row shows a live countdown. nil = permanent.
     public let expiresAt: Date?
-    public init(id: UUID, text: String, date: Date, mode: String = "manual", expiresAt: Date? = nil) {
-        self.id = id; self.text = text; self.date = date; self.mode = mode; self.expiresAt = expiresAt
+    /// Topic tags (history workspace). Empty = untagged.
+    public let tags: [String]
+    /// Non-nil when this entry is a "note" (整理成笔记) — rendered with an accent title.
+    public let title: String?
+    public init(id: UUID, text: String, date: Date, mode: String = "manual",
+                expiresAt: Date? = nil, tags: [String] = [], title: String? = nil) {
+        self.id = id; self.text = text; self.date = date; self.mode = mode
+        self.expiresAt = expiresAt; self.tags = tags; self.title = title
     }
 }
 
@@ -59,6 +65,22 @@ public protocol HistoryBridge: AnyObject {
     /// Edit an entry in place (issue #6). Default no-op for previews.
     func update(id: UUID, text: String)
 
+    // ----- History workspace mutations (default no-op so previews compile) -----
+    /// Rich edit: text + note title + tags in one shot (inline editor).
+    func update(id: UUID, text: String, title: String?, tags: [String])
+    /// Merge entries into one. Ascending-date join; the NEWEST entry is the anchor
+    /// (kept), others removed. asNote → newline-joined with `title`; else direct
+    /// concat. Tags unioned; mode = "oncall" iff every merged entry was oncall.
+    func merge(ids: [UUID], asNote: Bool, title: String?)
+    /// Union `tag` into each id.
+    func applyTag(ids: [UUID], tag: String)
+    /// Replace an entry's tags.
+    func setTags(id: UUID, tags: [String])
+    /// Insert a blank manual entry at now; returns its id for immediate editing.
+    @discardableResult func addEntry() -> UUID
+    /// Replace the whole list (undo restore).
+    func replaceAll(_ items: [HistoryItem])
+
     /// Serialize ALL history for "export all" (issue #5). The view writes the
     /// returned data via NSSavePanel. Defaults produce empty payloads in previews.
     func exportJSONData() -> Data
@@ -68,6 +90,12 @@ public protocol HistoryBridge: AnyObject {
 public extension HistoryBridge {
     var lifetimeChars: Int { 0 }
     func update(id: UUID, text: String) {}
+    func update(id: UUID, text: String, title: String?, tags: [String]) {}
+    func merge(ids: [UUID], asNote: Bool, title: String?) {}
+    func applyTag(ids: [UUID], tag: String) {}
+    func setTags(id: UUID, tags: [String]) {}
+    @discardableResult func addEntry() -> UUID { UUID() }
+    func replaceAll(_ items: [HistoryItem]) {}
     func exportJSONData() -> Data { Data("[]".utf8) }
     func exportPlainText() -> String { "" }
 }
