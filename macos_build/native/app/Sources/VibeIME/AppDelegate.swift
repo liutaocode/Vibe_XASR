@@ -49,6 +49,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     // MARK: Settings (single source of truth)
     private let store = SettingsStore.shared
     private let history = HistoryStore.shared
+    /// Held for the app's lifetime so the global push-to-talk hotkey keeps firing
+    /// with no window open: without it, App Nap / automatic termination suspends the
+    /// windowless background app and the CGEventTap goes silent.
+    private var bgActivity: NSObjectProtocol?
     private let pad = PadStore.shared
     /// Parsed post-recognition correction rules (refreshed on settings change).
     private var replacementRules: [Replacements.Rule] = []
@@ -97,6 +101,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         loadEngine()
         wireHotkey()
         _ = hotkey.start()
+        keepAliveInBackground()   // keep the global hotkey responsive with no window open
 
         installEditMenu()      // so ⌘C/⌘V/⌘X/⌘A/⌘Z work in Settings text fields
         observeSettings()
@@ -199,6 +204,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         LocalAPIServer.shared.restart(port: UInt16(clamping: store.apiPort),
                                       allowLAN: store.apiAllowLAN,
                                       enabled: store.apiEnabled)
+    }
+
+    /// Opt out of App Nap + automatic/sudden termination so the global push-to-talk
+    /// hotkey (a CGEventTap on the main run loop) keeps firing while the app sits in
+    /// the background with no window. Idle system sleep is still allowed.
+    private func keepAliveInBackground() {
+        guard bgActivity == nil else { return }
+        bgActivity = ProcessInfo.processInfo.beginActivity(
+            options: [.userInitiatedAllowingIdleSystemSleep, .automaticTerminationDisabled, .suddenTerminationDisabled],
+            reason: "Global push-to-talk dictation must stay responsive in the background")
     }
 
     /// Primary LAN IPv4 (en*) — shown so a reachable URL exists when LAN access is on.
