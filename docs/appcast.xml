@@ -6,13 +6,13 @@
     <description>Vibe XASR 自动更新源 / auto-update feed</description>
     <language>zh</language>
     <item>
-      <title>Vibe XASR 1.3.0</title>
-      <pubDate>Tue, 02 Jun 2026 23:47:49 +0800</pubDate>
-      <sparkle:version>9</sparkle:version>
-      <sparkle:shortVersionString>1.3.0</sparkle:shortVersionString>
+      <title>Vibe XASR 1.4.0</title>
+      <pubDate>Wed, 03 Jun 2026 11:10:22 +0800</pubDate>
+      <sparkle:version>10</sparkle:version>
+      <sparkle:shortVersionString>1.4.0</sparkle:shortVersionString>
       <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
-      <link>https://github.com/liutaocode/Vibe_XASR/releases/tag/v1.3.0</link>
-      <enclosure url="https://github.com/liutaocode/Vibe_XASR/releases/download/v1.3.0/VibeXASR-1.3.0.zip" type="application/octet-stream" sparkle:edSignature="lrb7XQVvljjnhsJazlcmrhJVersOWkTBrMV26EhW+9HDYx4XKQ+ZgRxn1VgOAt/m+br+mxyv5cHmRLmO3x+dCw==" length="579150275" />
+      <link>https://github.com/liutaocode/Vibe_XASR/releases/tag/v1.4.0</link>
+      <enclosure url="https://github.com/liutaocode/Vibe_XASR/releases/download/v1.4.0/VibeXASR-1.4.0.zip" type="application/octet-stream" sparkle:edSignature="HOpHUgP8sejKKc6p0O3x9JY97s2ZGU1K7E80eXUZicPHYjcg1jBrNN//HcSCZAPlgCGRn5uGASTlqO8aqdUUCg==" length="579910988" />
     </item>
   </channel>
 </rss>
