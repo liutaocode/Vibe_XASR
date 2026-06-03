@@ -2,9 +2,14 @@
 
 # Vibe XASR — 本地语音输入法
 
-按住热键说话,文字直接落到光标处。**100% 本地、离线,数据永远保存在本地,绝不上云。**
+> ### 📦 本仓库已归档,不再更新
+> 代码已**完全合入主仓库 [X-ASR](https://github.com/Gilgamesh-J/X-ASR)**,后续开发与发布都在那边进行。
+>
+> **👉 请移步 [github.com/Gilgamesh-J/X-ASR](https://github.com/Gilgamesh-J/X-ASR) 下载最新 release build。**
 
-> 🌐 项目主页:<https://liutaocode.github.io/Vibe_XASR/>
+---
+
+按住热键说话,文字直接落到光标处。**100% 本地、离线,数据永远保存在本地,绝不上云。**
 
 ## 功能
 
@@ -14,15 +19,12 @@
 - **内置便签 + 历史记录**:按日期分段保存,逐条复制 / 编辑、一键导出
 - **多语言界面**:中 / 英 / 日 / 韩,默认跟随系统
 - **隐私优先**:全程离线;可选「每次说话覆盖剪贴板」
-- **自动更新**:App 内一键升级,无需再手动下载
 
 ## 下载
 
-到 **[Releases](https://github.com/liutaocode/Vibe_XASR/releases/latest)** 下载已签名公证的 macOS 安装包。
+最新版本到主仓库 **[X-ASR Releases](https://github.com/Gilgamesh-J/X-ASR/releases)** 下载已签名公证的安装包。
 
-下载 `.dmg` → 双击 → 把 **Vibe XASR** 拖进「应用程序」→ 打开即可。装好后,新版本会在 App 内自动更新。
-
-> ⚠️ 需要 **macOS 15 (Sequoia) 或更高版本**。Universal 通用版,Apple Silicon 与 Intel 都支持。
+> ⚠️ macOS 版需要 **macOS 15 (Sequoia) 或更高版本**。Universal 通用版,Apple Silicon 与 Intel 都支持。
 
 ## 致谢
 

@@ -2,10 +2,15 @@
 
 # Vibe XASR — Local Voice Input Method
 
+> ### 📦 This repository is archived and no longer maintained
+> The code has been **fully merged into the main repository [X-ASR](https://github.com/Gilgamesh-J/X-ASR)**; all future development and releases happen there.
+>
+> **👉 Head to [github.com/Gilgamesh-J/X-ASR](https://github.com/Gilgamesh-J/X-ASR) for the latest release build.**
+
+---
+
 Hold a hotkey, speak, and the text lands right at your cursor. **100% local and offline — your
 data is always kept on-device and never goes to the cloud.**
-
-> 🌐 Homepage: <https://liutaocode.github.io/Vibe_XASR/>
 
 ## Features
 
@@ -16,17 +21,13 @@ data is always kept on-device and never goes to the cloud.**
 - **Built-in pad + history**: kept by date, per-entry copy / edit, one-click export
 - **Localized UI**: Chinese / English / Japanese / Korean — follows the system by default
 - **Privacy first**: fully offline; optional "overwrite clipboard on each utterance"
-- **Auto-update**: one-click upgrades inside the app — no more manual downloads
 
 ## Download
 
-Get the signed & notarized macOS build from
-**[Releases](https://github.com/liutaocode/Vibe_XASR/releases/latest)**.
+Get the signed & notarized build from the main repo's
+**[X-ASR Releases](https://github.com/Gilgamesh-J/X-ASR/releases)**.
 
-Open the `.dmg`, drag **Vibe XASR** into Applications, and launch it. Once installed, future
-versions update automatically inside the app.
-
-> ⚠️ Requires **macOS 15 (Sequoia) or later**. Universal build — both Apple Silicon and Intel.
+> ⚠️ The macOS build requires **macOS 15 (Sequoia) or later**. Universal build — both Apple Silicon and Intel.
 
 ## Credits
 
