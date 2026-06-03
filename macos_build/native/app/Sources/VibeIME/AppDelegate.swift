@@ -260,7 +260,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     private func setupStatusItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        statusItem.button?.title = "⏳"
+        setStatusIcon("⏳")
 
         let menu = NSMenu()
         statusMenuItem = NSMenuItem(title: L10n.shared.t("menu.loading"), action: nil, keyEquivalent: "")
@@ -329,8 +329,51 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         store.showDockIcon.toggle()   // posts dockIconChanged → applyDockPolicy()
     }
 
+    /// Set the menu-bar glyph. Callers still pass the legacy emoji string for the
+    /// state; we map it to a crisp SF Symbol template image (emoji-as-title render
+    /// as tofu boxes on some menu bars). Template images auto-adapt to light/dark;
+    /// a non-nil tint colors active states (red = recording, green = OnCall).
     private func setStatusIcon(_ icon: String) {
-        statusItem.button?.title = icon
+        guard let button = statusItem.button else { return }
+        let tint: NSColor?
+        switch icon {
+        case "🔴": tint = .systemRed       // recording
+        case "📞": tint = .systemGreen     // OnCall live
+        case "⚠️": tint = .systemOrange    // error
+        case "⏸": tint = .systemGray      // OnCall paused
+        default:  tint = nil               // ready / loading / finalizing → template (auto b/w)
+        }
+        let img = AppDelegate.drawnBarsIcon(tint: tint)
+        button.image = img
+        button.imageScaling = .scaleProportionallyDown
+        button.imagePosition = .imageOnly   // never render the title → no tofu/□ glyph
+        button.attributedTitle = NSAttributedString(string: "")
+        button.title = ""
+        button.contentTintColor = nil       // colors are baked into the drawn image
+    }
+
+    /// Draw the Vibe "three bars" mark as a menu-bar icon. Done by hand (Core
+    /// Graphics) instead of an SF Symbol so it ALWAYS renders — some menu bars
+    /// were showing a tofu/□ box for symbol/emoji glyphs. `tint == nil` returns a
+    /// template image (auto black/white); a color bakes that color in (active states).
+    static func drawnBarsIcon(tint: NSColor?) -> NSImage {
+        let size = NSSize(width: 18, height: 16)
+        let img = NSImage(size: size, flipped: false) { rect in
+            (tint ?? NSColor.black).setFill()
+            let barW: CGFloat = 2.6, gap: CGFloat = 2.4
+            let heights: [CGFloat] = [7, 13, 9]
+            let total = barW * 3 + gap * 2
+            var x = (rect.width - total) / 2
+            let midY = rect.height / 2
+            for h in heights {
+                let r = NSRect(x: x, y: midY - h / 2, width: barW, height: h)
+                NSBezierPath(roundedRect: r, xRadius: 1.2, yRadius: 1.2).fill()
+                x += barW + gap
+            }
+            return true
+        }
+        img.isTemplate = (tint == nil)
+        return img
     }
 
     @objc private func quit() {
