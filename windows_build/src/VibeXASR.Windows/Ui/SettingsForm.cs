@@ -123,6 +123,7 @@ public sealed class SettingsForm : Form
             ("dictionary", "tab.dictionary", "📖"),
             ("snippet", "tab.snippet", "⚡"),
             ("model", "tab.model", "🧠"),
+            ("share", "tab.share", "🔗"),
             ("records", "tab.records", "📋"),
             ("permissions", "tab.permissions", "🔐"),
             ("about", "tab.about", "ⓘ"),
@@ -189,6 +190,7 @@ public sealed class SettingsForm : Form
                 case "dictionary": BuildDictionary(col); break;
                 case "snippet": BuildSnippets(col); break;
                 case "model": BuildModel(col); _modelTimer.Start(); break;
+                case "share": BuildShare(col); break;
                 case "records": BuildRecords(); break;
                 case "permissions": BuildPermissions(col); break;
                 default: BuildAbout(col); break;
@@ -994,6 +996,53 @@ public sealed class SettingsForm : Form
             .Select(r => new Dictionary<string, string> { ["t"] = r.Trigger.Trim(), ["x"] = (r.Text ?? "").Replace("\r\n", "\n") });
         return System.Text.Json.JsonSerializer.Serialize(arr,
             new System.Text.Json.JsonSerializerOptions { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
+    }
+
+    // ---- 共享 (local share API): expose read-only history/dictionary to local AI coding agents ----
+    private void BuildShare(Column col)
+    {
+        bool zh = L10n.Resolved == Lang.Zh;
+        int w = _innerWidth;
+
+        var statusRow = new Panel { BackColor = Theme.Surface, Width = w, Height = 30 };
+        statusRow.Controls.Add(new Label
+        {
+            Text = _app.ApiRunning
+                ? (zh ? $"● 运行中 · http://127.0.0.1:{_app.ApiBoundPort}" : $"● Running · http://127.0.0.1:{_app.ApiBoundPort}")
+                : (zh ? "○ 未启动" : "○ Stopped"),
+            Font = Theme.Mono(9.5f), ForeColor = _app.ApiRunning ? Theme.Success : Theme.TextMuted,
+            AutoSize = false, Location = new Point(16, 6), Size = new Size(w - 32, 18), BackColor = Color.Transparent,
+        });
+
+        var keyRow = new Panel { BackColor = Theme.Surface, Width = w, Height = 66 };
+        keyRow.Controls.Add(new Label { Text = zh ? "访问密钥(每个请求都要带)" : "Access key (required on every request)", Font = Theme.Ui(9.5f), ForeColor = Theme.Text, AutoSize = false, Location = new Point(16, 8), Size = new Size(w - 32, 18), BackColor = Color.Transparent });
+        keyRow.Controls.Add(new TextBox { Text = _app.ApiKey, ReadOnly = true, Font = Theme.Mono(9.5f), BackColor = Theme.Surface2, ForeColor = Theme.Text, BorderStyle = BorderStyle.FixedSingle, Location = new Point(16, 31), Size = new Size(w - 32 - 140, 24) });
+        var copyKey = new VibeButton { Text = zh ? "复制" : "Copy", Style = VibeButton.Kind.Ghost, Size = new Size(60, 26), Location = new Point(w - 16 - 60, 30) };
+        copyKey.Click += (_, _) => { try { Clipboard.SetText(_app.ApiKey); } catch { } };
+        var reset = new VibeButton { Text = zh ? "重置" : "Reset", Style = VibeButton.Kind.Ghost, Size = new Size(60, 26), Location = new Point(w - 16 - 60 - 66, 30) };
+        reset.Click += (_, _) => { _app.RegenerateApiKey(); RebuildCurrentTab(); };
+        keyRow.Controls.Add(copyKey); keyRow.Controls.Add(reset);
+
+        var skillRow = new Panel { BackColor = Theme.Surface, Width = w, Height = 52 };
+        skillRow.Controls.Add(new Label { Text = zh ? "把下面地址贴进 AI 助手即可接入:" : "Paste this into your AI agent to connect:", Font = Theme.Ui(9f), ForeColor = Theme.TextMuted, AutoSize = false, Location = new Point(16, 6), Size = new Size(w - 32, 16), BackColor = Color.Transparent });
+        var skill = new VibeButton { Text = zh ? "复制接入地址 (/skill)" : "Copy connect URL (/skill)", Style = VibeButton.Kind.Solid, Size = new Size(200, 28), Location = new Point(16, 20) };
+        skill.Click += (_, _) => { int port = _app.ApiBoundPort > 0 ? _app.ApiBoundPort : S.ApiPort; try { Clipboard.SetText($"http://127.0.0.1:{port}/skill?key={_app.ApiKey}"); } catch { } };
+        skillRow.Controls.Add(skill);
+
+        col.AddGroup(zh ? "共享 · 把语音数据接到 AI 编程助手" : "SHARE · feed your dictation to AI coding agents", new List<Control>
+        {
+            Row(zh ? "启用本地共享" : "Enable local share",
+                zh ? "在本机开一个只读 HTTP 接口,让你的编程助手读取记录 / 词典 / 口令。默认只监听 127.0.0.1,不出本机。"
+                   : "Open a local read-only HTTP API so coding agents can read your records / dictionary / snippets. Localhost-only by default.",
+                Toggle(S.ApiEnabled, on => { _app.SetApiEnabled(on); RebuildCurrentTab(); })),
+            statusRow,
+            Row(zh ? "允许局域网访问" : "Allow LAN access",
+                zh ? "默认仅本机(127.0.0.1)。开启后同一局域网的设备也能访问,请谨慎。"
+                   : "Off → 127.0.0.1 only. On → reachable from your LAN; use with care.",
+                Toggle(S.ApiAllowLAN, on => { _app.SetApiAllowLAN(on); RebuildCurrentTab(); })),
+            keyRow,
+            skillRow,
+        });
     }
 
     // ---- About ----

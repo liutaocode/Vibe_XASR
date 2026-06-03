@@ -12,6 +12,7 @@ using VibeXASR.Windows.Dictation;
 using VibeXASR.Windows.Input;
 using System.Text.Json;
 using VibeXASR.Windows.Lexicon;
+using VibeXASR.Windows.Sharing;
 using VibeXASR.Windows.Models;
 using VibeXASR.Windows.Storage;
 using VibeXASR.Windows.Ui;
@@ -30,6 +31,7 @@ public sealed class TrayApp : IDisposable, IAppController
 
     private readonly Settings _settings;
     private readonly HistoryStore _history = new();
+    private LocalApiServer? _api;   // v1.4.0 本地共享 API
     private readonly PinyinNormalizer _pinyin = new();                                  // 词典: homophone correction
     private IReadOnlyList<Replacements.Rule> _replaceRules = Array.Empty<Replacements.Rule>(); // 词典: replacements
     private IReadOnlyList<Replacements.Rule> _snippetRules = Array.Empty<Replacements.Rule>(); // 口令: voice snippets
@@ -87,6 +89,8 @@ public sealed class TrayApp : IDisposable, IAppController
         BuildTray();
         RefreshCorrections();   // 词典: load homophone table + replacement rules
         CueSound.Shared.SetVolume(_settings.CueVolume);   // 提示音: sync cue volume from settings
+        _api = new LocalApiServer(_settings, _history);   // 共享: local read-only HTTP API
+        _api.Restart(_settings.ApiEnabled, _settings.ApiPort, _settings.ApiAllowLAN);
 
         _hotkey = new GlobalHotkey(_settings.HotkeyVk);
         _hotkey.KeyDown += (_, _) => OnHotkeyDown();
@@ -839,6 +843,33 @@ public sealed class TrayApp : IDisposable, IAppController
         _settings.Save();
         CueSound.Shared.SetVolume(_settings.CueVolume);
         if (_settings.CueEnabled) CueSound.Shared.Play(_settings.CueTheme, start: true);
+    }
+
+    // ---- 共享 (local share API) ----
+    public bool ApiRunning => _api?.IsRunning ?? false;
+    public int ApiBoundPort => _api?.BoundPort ?? 0;
+    public string ApiKey => _settings.ApiKey;
+
+    public void SetApiEnabled(bool on)
+    {
+        _settings.ApiEnabled = on; _settings.Save();
+        _api?.Restart(on, _settings.ApiPort, _settings.ApiAllowLAN);
+    }
+    public void SetApiAllowLAN(bool on)
+    {
+        _settings.ApiAllowLAN = on; _settings.Save();
+        _api?.Restart(_settings.ApiEnabled, _settings.ApiPort, on);
+    }
+    public void SetApiPort(int port)
+    {
+        _settings.ApiPort = port; _settings.Save();
+        _api?.Restart(_settings.ApiEnabled, port, _settings.ApiAllowLAN);
+    }
+    public string RegenerateApiKey()
+    {
+        var k = _settings.RegenerateApiKey();
+        _api?.Restart(_settings.ApiEnabled, _settings.ApiPort, _settings.ApiAllowLAN);   // pick up the new key
+        return k;
     }
 
     public void SetLaunchAtLogin(bool on)

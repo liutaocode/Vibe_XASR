@@ -86,6 +86,37 @@ public sealed class Settings
     /// <summary>Selected microphone endpoint ID. Empty = the system default recording device.</summary>
     public string MicDeviceId { get; set; } = "";
 
+    // ---- Local share API (v1.4.0: local read-only HTTP server for coding agents / AI assistants) ----
+
+    /// <summary>Master switch for the embedded local HTTP API. Off by default.</summary>
+    public bool ApiEnabled { get; set; } = false;
+
+    /// <summary>Allow LAN (0.0.0.0) access. Off → bound to 127.0.0.1 only.</summary>
+    public bool ApiAllowLAN { get; set; } = false;
+
+    /// <summary>TCP port for the local API (uncommon default → fewer conflicts).</summary>
+    public int ApiPort { get; set; } = 8473;
+
+    private string _apiKey = "";
+    /// <summary>Bearer key required on every request; generated on first access, never empty.</summary>
+    public string ApiKey
+    {
+        get { if (string.IsNullOrEmpty(_apiKey)) _apiKey = NewApiKey(); return _apiKey; }
+        set => _apiKey = value ?? "";
+    }
+
+    /// <summary>Rotate the key (invalidates any skill already shared with the old key). Persists.</summary>
+    public string RegenerateApiKey() { _apiKey = NewApiKey(); Save(); return _apiKey; }
+
+    private static string NewApiKey()
+    {
+        const string chars = "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no look-alikes
+        var bytes = System.Security.Cryptography.RandomNumberGenerator.GetBytes(32);
+        var sb = new System.Text.StringBuilder(32);
+        foreach (var b in bytes) sb.Append(chars[b % chars.Length]);
+        return sb.ToString();
+    }
+
     // ---- Cue sound (Typeless-style chime on dictation start/stop) ----
 
     /// <summary>Play a soft cue when dictation starts and ends. On by default.</summary>

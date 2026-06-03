@@ -19,6 +19,10 @@ public sealed class HistoryEntry
     public string Text { get; set; } = string.Empty;
     public string Mode { get; set; } = "paste";
     public DateTimeOffset? ExpiresAt { get; set; }
+
+    // v1.4.0 history workspace: per-entry tags + an optional title (for clustered/merged blocks).
+    public List<string> Tags { get; set; } = new();
+    public string? Title { get; set; }
 }
 
 /// <summary>On-disk shape: cumulative stats + the entry list (object form).</summary>
@@ -138,6 +142,112 @@ public sealed class HistoryStore
             if (e is not null) { e.Text = text.Trim(); Persist(); }
         }
     }
+
+    // ===== v1.4.0 history-workspace operations =====
+
+    /// <summary>Rich edit (inline editor): text + optional note title + tags. Keeps id/date/mode.</summary>
+    public void Update(Guid id, string text, string? title, List<string> tags)
+    {
+        lock (_gate)
+        {
+            var e = _entries.FirstOrDefault(x => x.Id == id);
+            if (e is null) return;
+            e.Text = text.Trim();
+            e.Title = string.IsNullOrWhiteSpace(title) ? null : title.Trim();
+            e.Tags = tags?.ToList() ?? new();
+            Persist();
+        }
+    }
+
+    /// <summary>Merge entries → one. Newest entry is the anchor (kept), others removed. Tags unioned;
+    /// mode="oncall" iff every merged entry was oncall, else "manual". asNote → newline-join + note
+    /// title; else direct concat. Join is in DISPLAY (newest-first) order, matching macOS.</summary>
+    public void Merge(IReadOnlyList<Guid> ids, bool asNote, string? title)
+    {
+        lock (_gate)
+        {
+            var set = new HashSet<Guid>(ids);
+            var displayIdx = _entries.OrderByDescending(e => e.Timestamp).Select((e, i) => (e.Id, i))
+                                     .ToDictionary(x => x.Id, x => x.i);
+            var chosen = _entries.Where(e => set.Contains(e.Id))
+                                 .OrderByDescending(e => e.Timestamp)
+                                 .ThenBy(e => displayIdx.TryGetValue(e.Id, out var i) ? i : 0)
+                                 .ToList();
+            if (chosen.Count < (asNote ? 1 : 2)) return;
+            var anchor = chosen[0];
+            anchor.Text = string.Join(asNote ? "\n" : "", chosen.Select(e => e.Text));
+            var mergedTags = new List<string>();
+            foreach (var e in chosen) foreach (var t in e.Tags) if (!mergedTags.Contains(t)) mergedTags.Add(t);
+            anchor.Tags = mergedTags;
+            anchor.Mode = chosen.All(e => e.Mode == "oncall") ? "oncall" : "manual";
+            anchor.Title = asNote ? (string.IsNullOrWhiteSpace(title) ? "整理笔记" : title.Trim()) : null;
+            set.Remove(anchor.Id);
+            _entries.RemoveAll(e => set.Contains(e.Id));
+            Persist();
+        }
+    }
+
+    /// <summary>Add a tag to several entries (skips ones that already have it).</summary>
+    public void ApplyTag(IReadOnlyList<Guid> ids, string tag)
+    {
+        if (string.IsNullOrWhiteSpace(tag)) return;
+        tag = tag.Trim();
+        lock (_gate)
+        {
+            var set = new HashSet<Guid>(ids);
+            bool changed = false;
+            foreach (var e in _entries)
+                if (set.Contains(e.Id) && !e.Tags.Contains(tag)) { e.Tags.Add(tag); changed = true; }
+            if (changed) Persist();
+        }
+    }
+
+    /// <summary>Replace one entry's tags wholesale.</summary>
+    public void SetTags(Guid id, List<string> tags)
+    {
+        lock (_gate)
+        {
+            var e = _entries.FirstOrDefault(x => x.Id == id);
+            if (e is null) return;
+            e.Tags = tags?.ToList() ?? new();
+            Persist();
+        }
+    }
+
+    /// <summary>Insert a new empty "manual" note at the top; returns its id (for inline editing).</summary>
+    public Guid AddEntry()
+    {
+        lock (_gate)
+        {
+            var e = new HistoryEntry { Text = "", Mode = "manual" };
+            _entries.Add(e);
+            Persist();
+            return e.Id;
+        }
+    }
+
+    /// <summary>Deep-copy snapshot of all entries (for the workspace undo stack).</summary>
+    public List<HistoryEntry> Snapshot()
+    {
+        lock (_gate) return _entries.Select(Clone).ToList();
+    }
+
+    /// <summary>Restore a previous snapshot wholesale (undo).</summary>
+    public void Restore(List<HistoryEntry> snapshot)
+    {
+        lock (_gate)
+        {
+            _entries.Clear();
+            _entries.AddRange(snapshot.Select(Clone));
+            Persist();
+        }
+    }
+
+    private static HistoryEntry Clone(HistoryEntry e) => new()
+    {
+        Id = e.Id, Timestamp = e.Timestamp, Text = e.Text, Mode = e.Mode,
+        ExpiresAt = e.ExpiresAt, Tags = new List<string>(e.Tags), Title = e.Title,
+    };
 
     /// <summary>Clear all rows AND reset the cumulative stats (destructive).</summary>
     public void ClearAll()

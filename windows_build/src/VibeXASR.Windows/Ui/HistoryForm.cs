@@ -244,12 +244,12 @@ public sealed class HistoryForm : Form
     public HistoryForm(HistoryStore store)
     {
         Text = L10n.T("history.title");
-        ClientSize = new Size(460, 580);
-        MinimumSize = new Size(380, 360);
+        ClientSize = new Size(760, 640);   // wider for the v1.4.0 workspace (calendar + clustered rows)
+        MinimumSize = new Size(520, 420);
         StartPosition = FormStartPosition.CenterScreen;
         BackColor = Theme.Surface;
         Font = Theme.Ui(9.5f);
-        Controls.Add(new HistoryPanel(store) { Dock = DockStyle.Fill });
+        Controls.Add(new HistoryWorkspacePanel(store) { Dock = DockStyle.Fill });
     }
 
     protected override void OnHandleCreated(EventArgs e)

@@ -43,6 +43,15 @@ public interface IAppController
     void SetCueTheme(string theme);      // tick | chime | soft | drop | marimba
     void SetCueVolume(string preset);    // low | med | high
 
+    // ----- v1.4.0 local share API (共享) -----
+    bool ApiRunning { get; }
+    int ApiBoundPort { get; }
+    string ApiKey { get; }
+    void SetApiEnabled(bool on);
+    void SetApiAllowLAN(bool on);
+    void SetApiPort(int port);
+    string RegenerateApiKey();
+
     // ----- permissions (Windows: microphone privacy) -----
     bool MicGranted();
     void OpenMicPrivacy();
